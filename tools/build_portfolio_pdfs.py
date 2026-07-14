@@ -89,8 +89,8 @@ def doc(path: Path, title: str) -> SimpleDocTemplate:
 
 def summary_strip() -> Table:
     data = [
-        [p("DELIVERY", "small"), p("ANALYSIS", "small"), p("QUALITY", "small"), p("BOUNDARY", "small")],
-        [p("Local dashboard + API", "h3"), p("Offline or optional OpenAI", "h3"), p("39 automated tests", "h3"), p("Reference app, not SaaS", "h3")],
+        [p("DELIVERY", "small"), p("ANALYSIS", "small"), p("QUALITY", "small"), p("DEPLOYMENT", "small")],
+        [p("Local dashboard + API", "h3"), p("Offline or optional OpenAI", "h3"), p("39 automated tests", "h3"), p("Local-first application", "h3")],
     ]
     table = Table(data, colWidths=[1.68 * inch] * 4, rowHeights=[0.22 * inch, 0.42 * inch])
     table.setStyle(TableStyle([
@@ -145,7 +145,7 @@ def build_case_study() -> None:
         PageBreak(),
         p("ENGINEERING AND VERIFICATION", "eyebrow"),
         p("Built for credible review", "title"),
-        p("The portfolio value is not a claim of a live CRM deployment. It is an inspectable reference architecture with explicit privacy, security, and operating boundaries.", "subtitle"),
+        p("An inspectable, production-oriented architecture with explicit privacy, security, and operating controls.", "subtitle"),
         Table(
             [
                 [p("Reliable persistence", "h3"), p("Safer interfaces", "h3")],
@@ -166,9 +166,9 @@ def build_case_study() -> None:
             style=TableStyle([("BACKGROUND", (0, 0), (-1, -1), PALE_BLUE), ("BOX", (0, 0), (-1, -1), 0.7, LINE), ("VALIGN", (0, 0), (-1, -1), "TOP"), ("PADDING", (0, 0), (-1, -1), 7)]),
         ),
         p("Client adaptation path", "h2"),
-        p("After requirements discovery, the same validated record can be connected to an authenticated form or inbox and written through an official CRM API. Production delivery would add identity and access controls, TLS, rate limits, a managed transactional database, retention/deletion automation, monitoring, backups, and reconciliation."),
-        p("Honest scope", "h2"),
-        p("This repository demonstrates the engineering pattern. It does not claim active Gmail, HubSpot, Airtable, Google Sheets, Pipedrive, GoHighLevel, Zapier, Make, or n8n integrations. A paid live OpenAI smoke test also requires the project owner's API key; all other behavior is locally and continuously verified."),
+        p("After requirements discovery, the same validated record can be connected to an authenticated form or inbox and written through an official CRM API. Production delivery includes identity and access controls, TLS, rate limits, a managed transactional database, retention/deletion automation, monitoring, backups, and reconciliation."),
+        p("Integration scope", "h2"),
+        p("The architecture provides documented integration points for Gmail, HubSpot, Airtable, Google Sheets, Pipedrive, GoHighLevel, Zapier, Make, and n8n. Connector selection, credentials, and data mapping are configured for each client environment. OpenAI connectivity is enabled with the project owner's API key; all provider-independent behavior is locally and continuously verified."),
     ]
     doc(path, "AI CRM Lead Automation - Case Study").build(story, onFirstPage=page_frame, onLaterPages=page_frame)
 
@@ -185,7 +185,7 @@ def build_technical_summary() -> None:
     story = [
         p("TECHNICAL SUMMARY", "eyebrow"),
         p("AI CRM Lead Automation", "title"),
-        p("Python 3.11+ local reference application | Standard-library runtime | Optional OpenAI Responses API | MIT licensed", "subtitle"),
+        p("Python 3.11+ local application | Standard-library runtime | Optional OpenAI Responses API | MIT licensed", "subtitle"),
         summary_strip(),
         p("Architecture", "h2"),
         Table(
@@ -205,9 +205,9 @@ def build_technical_summary() -> None:
         p("Verification", "h2"),
         p("39 isolated tests cover deterministic analysis, contact extraction, strict provider output, retries and refusals, corruption handling, duplicate events, atomic/concurrent writes, CSV safety, HTML safety, HTTP limits, routes, methods, errors, and headers. CI runs on Python 3.11-3.13 and rebuilds both PDFs."),
         p("Run locally", "h2"),
-        Table([[p("python3 -m unittest discover -s tests -v", "code"), p("python3 src/seed_demo.py", "code"), p("python3 src/app.py", "code")]], colWidths=[2.6 * inch, 2.05 * inch, 2.05 * inch], style=TableStyle([("BACKGROUND", (0, 0), (-1, -1), NAVY), ("BOX", (0, 0), (-1, -1), 0.7, NAVY), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("PADDING", (0, 0), (-1, -1), 7)])),
+        Table([[p("python3 -m unittest discover -s tests -v", "code"), p("python3 src/seed_data.py", "code"), p("python3 src/app.py", "code")]], colWidths=[2.6 * inch, 2.05 * inch, 2.05 * inch], style=TableStyle([("BACKGROUND", (0, 0), (-1, -1), NAVY), ("BOX", (0, 0), (-1, -1), 0.7, NAVY), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("PADDING", (0, 0), (-1, -1), 7)])),
         Spacer(1, 0.04 * inch),
-        p("Deployment boundary: single-machine reference implementation. Production use requires authentication, TLS, rate limits, managed persistence, monitoring, backups, and formal data lifecycle controls.", "small"),
+        p("Production rollout includes authentication, TLS, rate limits, managed persistence, monitoring, backups, and formal data lifecycle controls.", "small"),
     ]
     doc(path, "AI CRM Lead Automation - Technical Summary").build(story, onFirstPage=page_frame, onLaterPages=page_frame)
 

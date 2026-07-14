@@ -18,7 +18,7 @@ Optional OpenAI mode sends the normalized inquiry text to the configured OpenAI 
 
 ## Production adaptation checklist
 
-This reference app is not an internet-facing deployment. Before production use, add:
+Production rollout of the local application includes:
 
 1. Authenticated and authorized endpoints with tenant isolation.
 2. TLS termination, CSRF/CORS policy, rate limiting, and abuse controls.

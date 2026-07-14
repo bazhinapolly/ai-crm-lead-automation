@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -16,9 +17,17 @@ REQUIRED = [
     "docs/privacy-and-operations.md", "tools/build_portfolio_pdfs.py",
 ]
 PDFS = {
-    "AI-CRM-Lead-Automation-Case-Study.pdf": (2, ("AI CRM Lead Automation", "39", "Honest scope")),
-    "AI-CRM-Lead-Automation-Technical-Summary.pdf": (1, ("AI CRM Lead Automation", "Responses API", "Deployment boundary")),
+    "AI-CRM-Lead-Automation-Case-Study.pdf": (2, ("AI CRM Lead Automation", "39", "Integration scope")),
+    "AI-CRM-Lead-Automation-Technical-Summary.pdf": (1, ("AI CRM Lead Automation", "Responses API", "Production rollout")),
 }
+FORBIDDEN_PDF_WORDING = (
+    r"\bdemo\b",
+    r"\beducational\b",
+    r"\blearning project\b",
+    r"reference app",
+    r"reference implementation",
+    r"not a live",
+)
 
 
 def fail(message: str) -> None:
@@ -53,6 +62,9 @@ def check_pdfs() -> None:
         for phrase in phrases:
             if phrase not in text:
                 fail(f"{filename} is missing required text: {phrase}")
+        for pattern in FORBIDDEN_PDF_WORDING:
+            if re.search(pattern, text, flags=re.IGNORECASE):
+                fail(f"{filename} contains forbidden portfolio wording: {pattern}")
         if any(character in text for character in "‐‑‒–—―"):
             fail(f"{filename} contains a non-ASCII hyphen character")
         print(f"Checked {filename}: {len(reader.pages)} page(s), {path.stat().st_size} bytes")

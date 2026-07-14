@@ -1,1 +1,1 @@
-"""Test package for the CRM reference implementation."""
+"""Test package for the CRM application."""

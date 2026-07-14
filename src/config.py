@@ -1,4 +1,4 @@
-"""Validated environment configuration for the local reference application."""
+"""Validated environment configuration for the local CRM application."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ class Settings:
         host = os.environ.get("HOST", "127.0.0.1").strip()
         try:
             if not ipaddress.ip_address(host).is_loopback:
-                raise ValueError("HOST must be a loopback address for this local reference app")
+                raise ValueError("HOST must be a loopback address for this local application")
         except ValueError as exc:
             if "loopback" in str(exc):
                 raise

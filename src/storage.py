@@ -1,4 +1,4 @@
-"""Thread-safe, atomic JSON storage for the local CRM reference app."""
+"""Thread-safe, atomic JSON storage for the local CRM application."""
 
 from __future__ import annotations
 

@@ -15,7 +15,7 @@ def main() -> None:
     store.reset()
     for sample in samples:
         store.create_lead(sample["source"], sample["message"])
-    print(f"Seeded {len(samples)} demo leads in {settings.data_dir}.")
+    print(f"Seeded {len(samples)} sample leads in {settings.data_dir}.")
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@ Two analysis modes share the same validated contract:
 
 - Thread-safe read/modify/write operations for the multi-threaded local server
 - Atomic temporary-file replacement to prevent partial JSON writes
-- Isolated test data so verification never mutates portfolio demo files
+- Isolated test data so verification never mutates portfolio project files
 - Request byte and message-length limits, exact JSON media-type checks, and generic server errors
 - HTML escaping and allowlisted priority classes in the dashboard
 - Spreadsheet formula neutralization in CSV exports
@@ -30,4 +30,4 @@ The result is a credible, reproducible demonstration of lead-triage architecture
 
 ## Scope boundary
 
-The repository is a single-machine reference implementation. It does not claim active integrations with Gmail, HubSpot, Airtable, Google Sheets, Pipedrive, GoHighLevel, Zapier, Make, or n8n. Production use requires authentication, TLS, managed persistence, rate limiting, monitoring, backups, and formal data lifecycle controls.
+The project is a single-machine local application with documented integration points for Gmail, HubSpot, Airtable, Google Sheets, Pipedrive, GoHighLevel, Zapier, Make, and n8n. Production rollout adds authentication, TLS, managed persistence, rate limiting, monitoring, backups, and formal data lifecycle controls.

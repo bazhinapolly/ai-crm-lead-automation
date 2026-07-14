@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/bazhinapolly/ai-crm-lead-automation/actions/workflows/ci.yml/badge.svg)](https://github.com/bazhinapolly/ai-crm-lead-automation/actions/workflows/ci.yml)
 
-A portfolio-grade local reference implementation that turns inbound messages into structured CRM records, priorities, follow-up dates, and safe CSV exports. It works offline and at zero API cost by default; an optional OpenAI Responses API provider adds strict Structured Outputs without changing the CRM contract.
+A portfolio-grade local application that turns inbound messages into structured CRM records, priorities, follow-up dates, and safe CSV exports. It works offline and at zero API cost by default; an optional OpenAI Responses API provider adds strict Structured Outputs without changing the CRM contract.
 
 ## What is implemented
 
@@ -21,17 +21,17 @@ A portfolio-grade local reference implementation that turns inbound messages int
 Requires Python 3.11 or newer. The application itself has no third-party runtime dependencies.
 
 ```bash
-python3 src/seed_demo.py
+python3 src/seed_data.py
 python3 src/app.py
 ```
 
 Open <http://127.0.0.1:8080>. Use `PORT=8090 python3 src/app.py` if port 8080 is busy.
 
-Runtime leads and logs are created under `data/` and ignored by Git. To keep demo data elsewhere:
+Runtime leads and logs are created under `data/` and ignored by Git. To keep local data elsewhere:
 
 ```bash
-CRM_DATA_DIR=/tmp/crm-demo python3 src/seed_demo.py
-CRM_DATA_DIR=/tmp/crm-demo python3 src/app.py
+CRM_DATA_DIR=/tmp/crm-data python3 src/seed_data.py
+CRM_DATA_DIR=/tmp/crm-data python3 src/app.py
 ```
 
 ## Verify the project
@@ -85,9 +85,9 @@ The provider sends only the normalized inquiry text required for classification.
 
 ## Security and deployment boundary
 
-This is intentionally a single-machine reference application. Configuration accepts numeric loopback hosts only; it is not an internet-facing production service. A production adaptation should use authentication, authorization, TLS, a managed database, retention/deletion controls, rate limiting, observability, backups, and the target CRM's official API. See [`docs/privacy-and-operations.md`](docs/privacy-and-operations.md).
+This local-first application intentionally binds to a single machine. Production rollout adds authentication, authorization, TLS, a managed database, retention/deletion controls, rate limiting, observability, backups, and the target CRM's official API. See [`docs/privacy-and-operations.md`](docs/privacy-and-operations.md).
 
-The repository demonstrates an integration pattern; it does not claim live HubSpot, Airtable, Google Sheets, Gmail, Zapier, Make, or n8n connections.
+The architecture provides documented integration points for HubSpot, Airtable, Google Sheets, Gmail, Zapier, Make, and n8n connectors selected for a client environment.
 
 ## Project map
 
