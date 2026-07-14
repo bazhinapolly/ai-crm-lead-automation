@@ -1,32 +1,33 @@
-# AI CRM Lead Automation System
+# AI CRM Lead Automation - Portfolio Case Study
 
-## Problem
+## Challenge
 
-Small service businesses often receive leads from Gmail, website forms, chat widgets, referrals, and ads. The information is usually copied manually into a spreadsheet or CRM, which creates delays, missed follow-ups, and poor visibility into lead quality.
+Inbound leads often arrive through several disconnected channels. Small teams then copy contact data into spreadsheets, interpret urgency manually, and remember follow-ups without a consistent process. That creates slow responses, incomplete records, and weak pipeline visibility.
 
 ## Solution
 
-I built a lightweight CRM automation demo that captures an inbound lead message, extracts contact details, classifies the requested service, scores urgency and intent, recommends the next action, stores the lead, and displays everything in a simple dashboard.
+I built a local reference workflow that converts an unstructured lead message into a bounded CRM record. The application validates the request, extracts contact details, classifies the request, calculates a transparent priority score, assigns a follow-up date, detects duplicate email addresses, records automation events, and exposes the result through a dashboard, JSON API, and CSV export.
 
-## What I Built
+Two analysis modes share the same validated contract:
 
-- Local webhook-style intake endpoint for new lead messages
-- AI-style lead analysis layer with structured output
-- Contact extraction for name, email, phone, and company
-- Service classification for CRM, Google Workspace, appointment, support, invoice, and reporting workflows
-- Hot/Warm/Cold priority scoring
-- Follow-up date and next-action generation
-- JSON-backed mini CRM storage
-- Duplicate detection by email
-- Automation event logs
-- Browser dashboard for pipeline visibility
-- CSV export for Google Sheets, Airtable, HubSpot, Pipedrive, or manual review
-- Demo data seeding and verification tests
+- Deterministic mode is the safe default. It is offline, reproducible, and free to run.
+- Optional OpenAI mode uses the Responses API, strict Structured Outputs, `store: false`, bounded transient retries, and a second local schema validation pass.
 
-## Business Impact
+## Engineering highlights
 
-This type of workflow helps businesses respond faster, prioritize high-value leads, reduce manual admin work, and avoid losing inquiries inside inboxes or spreadsheets.
+- Thread-safe read/modify/write operations for the multi-threaded local server
+- Atomic temporary-file replacement to prevent partial JSON writes
+- Isolated test data so verification never mutates portfolio demo files
+- Request byte and message-length limits, exact JSON media-type checks, and generic server errors
+- HTML escaping and allowlisted priority classes in the dashboard
+- Spreadsheet formula neutralization in CSV exports
+- Raw inquiry retention disabled by default as a privacy boundary
+- 39 automated tests plus CI on Python 3.11, 3.12, and 3.13
 
-## Adaptation Options
+## Outcome
 
-The same architecture can be adapted to Gmail, Google Sheets, Airtable, HubSpot, GoHighLevel, Pipedrive, Zapier, Make, n8n, website forms, and chat widgets.
+The result is a credible, reproducible demonstration of lead-triage architecture without pretending to be a hosted production CRM. It is designed for adaptation to a client's authenticated form, inbox, CRM, or automation platform after access, retention, and operational requirements are defined.
+
+## Scope boundary
+
+The repository is a single-machine reference implementation. It does not claim active integrations with Gmail, HubSpot, Airtable, Google Sheets, Pipedrive, GoHighLevel, Zapier, Make, or n8n. Production use requires authentication, TLS, managed persistence, rate limiting, monitoring, backups, and formal data lifecycle controls.

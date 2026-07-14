@@ -1,132 +1,106 @@
-# AI CRM Lead Automation System
+# AI CRM Lead Automation
 
-A practical CRM lead automation workflow for small service businesses. It captures incoming lead messages, analyzes them with AI-style structured extraction, stores them in a lightweight CRM, generates follow-up suggestions, and shows a browser dashboard.
+[![CI](https://github.com/bazhinapolly/ai-crm-lead-automation/actions/workflows/ci.yml/badge.svg)](https://github.com/bazhinapolly/ai-crm-lead-automation/actions/workflows/ci.yml)
 
-This portfolio case study is designed to show the type of automation small businesses often need: fewer missed leads, faster follow-ups, clearer pipeline visibility, and less manual admin work.
+A portfolio-grade local reference implementation that turns inbound messages into structured CRM records, priorities, follow-up dates, and safe CSV exports. It works offline and at zero API cost by default; an optional OpenAI Responses API provider adds strict Structured Outputs without changing the CRM contract.
 
-## What It Does
+## What is implemented
 
-- Accepts incoming lead messages through a local webhook-style endpoint
-- Extracts lead details from email, form, or chat-style text
-- Classifies service type, urgency, budget signal, intent, and next action
-- Scores leads as Hot, Warm, or Cold
-- Stores leads in a JSON-backed mini CRM
-- Shows a browser dashboard with lead status and follow-up priorities
-- Exports leads to CSV for Google Sheets or Airtable-style workflows
-- Includes local verification mode so the workflow can be tested without an API key
-- Includes an OpenAI-ready analysis layer for real client adaptation
+- Validated `POST /api/intake` endpoint with body limits and safe error responses
+- Deterministic service, urgency, budget, intent, and Hot/Warm/Cold scoring
+- Optional OpenAI Responses API mode with strict JSON Schema and `store: false`
+- Contact extraction, duplicate detection, follow-up planning, and event logs
+- Thread-safe JSON read/modify/write operations and atomic file replacement
+- Raw lead messages excluded from storage unless explicitly enabled
+- HTML escaping, constrained CSS classes, security headers, and CSV formula neutralization
+- Responsive local dashboard, JSON endpoints, and CSV handoff
+- 39 isolated standard-library tests and CI on Python 3.11, 3.12, and 3.13
 
-## Why This Matters
+## Local quick start
 
-Many small businesses receive leads from Gmail, website forms, chat widgets, referrals, or ads. Those leads often get copied manually into spreadsheets or CRMs, and follow-ups are easy to miss.
-
-This project shows a practical automation pattern:
-
-```text
-Gmail/Form/Webhook -> AI Lead Analysis -> CRM Record -> Follow-up Plan -> Dashboard -> Export/Integration
-```
-
-## Tech Stack
-
-- Python standard library
-- Local HTTP server
-- JSON storage
-- CSV export
-- Browser dashboard
-- OpenAI-ready AI analysis layer
-
-No external dependencies are required for local verification mode.
-
-## Project Structure
-
-```text
-ai-crm-lead-automation/
-  src/
-    app.py
-    lead_ai.py
-    storage.py
-    seed_demo.py
-    test_workflow.py
-  data/
-    sample_messages.json
-    leads.json
-    automation_logs.json
-  docs/
-    portfolio-case-study.md
-    client-verification-report.md
-    workflow-diagram.md
-    AI-CRM-Lead-Automation-Case-Study.pdf
-    AI-CRM-Lead-Automation-Technical-Summary.pdf
-  .env.example
-  README.md
-```
-
-## Quick Start
-
-From this project folder:
+Requires Python 3.11 or newer. The application itself has no third-party runtime dependencies.
 
 ```bash
 python3 src/seed_demo.py
-python3 src/test_workflow.py
 python3 src/app.py
 ```
 
-Then open:
+Open <http://127.0.0.1:8080>. Use `PORT=8090 python3 src/app.py` if port 8080 is busy.
 
-```text
-http://127.0.0.1:8080
-```
-
-If port `8080` is already in use, run the application on another port:
+Runtime leads and logs are created under `data/` and ignored by Git. To keep demo data elsewhere:
 
 ```bash
-PORT=8090 python3 src/app.py
+CRM_DATA_DIR=/tmp/crm-demo python3 src/seed_demo.py
+CRM_DATA_DIR=/tmp/crm-demo python3 src/app.py
 ```
 
-## API Examples
+## Verify the project
 
-Health check:
+```bash
+python3 -m unittest discover -s tests -v
+python3 tools/check_project.py --skip-pdf
+```
+
+To rebuild and validate the Upwork portfolio PDFs:
+
+```bash
+python3 -m pip install -r requirements-dev.txt
+python3 tools/build_portfolio_pdfs.py
+python3 tools/check_project.py
+```
+
+Final PDFs are written to [`output/pdf`](output/pdf). Temporary render files are not committed.
+
+## API
 
 ```bash
 curl http://127.0.0.1:8080/api/health
+
+curl -X POST http://127.0.0.1:8080/api/intake \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"website_form","message":"Hi, this is Sarah from Oakwood Dental. We need appointment automation urgently. Budget is $1500. Email sarah@example.com."}'
 ```
 
-Submit a new lead:
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/` | Local CRM dashboard |
+| `GET` | `/api/health` | Health and analysis mode |
+| `GET` | `/api/leads` | Leads plus pipeline metrics |
+| `GET` | `/api/logs` | Automation event log |
+| `POST` | `/api/intake` | Validate and classify one lead |
+| `GET` | `/export/leads.csv` | Spreadsheet-safe CSV export |
+
+## Optional OpenAI mode
+
+Export variables in your shell; this project deliberately does not auto-load `.env` files.
 
 ```bash
-curl -X POST http://127.0.0.1:8080/api/intake \
-  -H "Content-Type: application/json" \
-  -d '{"source":"website_form","message":"Hi, my name is Sarah from Oakwood Dental. We need help automating appointment reminders and follow-ups. Please call me this week. Budget is around $1500."}'
+export USE_OPENAI=1
+export OPENAI_API_KEY='your-key'
+export OPENAI_MODEL='gpt-4o-mini-2024-07-18'
+python3 src/app.py
 ```
 
-Export leads to CSV:
+The provider sends only the normalized inquiry text required for classification. It uses the [Responses API](https://developers.openai.com/api/reference/resources/responses/methods/create), [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs), a strict local schema validation pass, bounded transient retries, and redacted error logging. API keys, provider response bodies, and lead text are never written to application logs.
+
+## Security and deployment boundary
+
+This is intentionally a single-machine reference application. Configuration accepts numeric loopback hosts only; it is not an internet-facing production service. A production adaptation should use authentication, authorization, TLS, a managed database, retention/deletion controls, rate limiting, observability, backups, and the target CRM's official API. See [`docs/privacy-and-operations.md`](docs/privacy-and-operations.md).
+
+The repository demonstrates an integration pattern; it does not claim live HubSpot, Airtable, Google Sheets, Gmail, Zapier, Make, or n8n connections.
+
+## Project map
 
 ```text
-http://127.0.0.1:8080/export/leads.csv
+src/                 application, analysis, provider, and storage
+tests/               isolated unit and local HTTP integration tests
+data/                sample inputs; runtime CRM files are ignored
+docs/                case-study source and operating boundaries
+tools/               PDF builder and repository checks
+output/pdf/          final Upwork-ready portfolio documents
+.github/workflows/   multi-version CI and reproducible PDF build
 ```
 
-## Local Verification vs Real Client Mode
+## License
 
-The default version uses deterministic local lead analysis so the workflow can be verified without API costs or an exposed API key.
-
-For a real client implementation, the `analyze_lead()` layer can be connected to OpenAI, Claude, Gemini, or another model while preserving the same structured CRM fields.
-
-## Use Cases
-
-- Contractor lead tracking
-- Agency inquiry routing
-- Clinic appointment requests
-- Consulting discovery calls
-- Home service quote follow-ups
-- B2B inbound lead triage
-- CRM cleanup and prioritization
-
-## Business Value
-
-This type of automation helps businesses respond to leads faster, reduce manual CRM work, avoid missed opportunities, keep lead data organized, and give the team a clear view of which prospects should be contacted first.
-
-## Portfolio Context
-
-This is a portfolio case study built to show the architecture, workflow logic, structured AI output, dashboard, CSV export, and documentation patterns behind a practical CRM lead automation system.
-
-It can be adapted to Google Sheets, Airtable, HubSpot, GoHighLevel, Pipedrive, Zapier, Make, n8n, or other CRM and automation platforms.
+[MIT](LICENSE) - Copyright 2026 Polina Bazhina.

@@ -1,7 +1,13 @@
 .DS_Store
 .env
-__pycache__/
-*.pyc
-*.log
 .venv/
 venv/
+__pycache__/
+*.py[cod]
+*.log
+.coverage
+.pytest_cache/
+.ruff_cache/
+data/leads.json
+data/automation_logs.json
+tmp/

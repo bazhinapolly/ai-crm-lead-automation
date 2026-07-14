@@ -1,24 +1,22 @@
-"""Seed the demo CRM with sample inbound lead messages."""
+"""Seed an isolated or configured local CRM with sample messages."""
 
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
-from storage import ROOT_DIR, create_lead, reset_demo_data
+from app import build_store
+from config import ROOT_DIR, Settings
 
 
 def main() -> None:
-    sample_path = ROOT_DIR / "data" / "sample_messages.json"
-    samples = json.loads(sample_path.read_text(encoding="utf-8"))
-
-    reset_demo_data()
+    settings = Settings.from_env()
+    samples = json.loads((ROOT_DIR / "data" / "sample_messages.json").read_text(encoding="utf-8"))
+    store = build_store(settings)
+    store.reset()
     for sample in samples:
-        create_lead(sample["source"], sample["message"])
-
-    print(f"Seeded {len(samples)} demo leads.")
+        store.create_lead(sample["source"], sample["message"])
+    print(f"Seeded {len(samples)} demo leads in {settings.data_dir}.")
 
 
 if __name__ == "__main__":
     main()
-

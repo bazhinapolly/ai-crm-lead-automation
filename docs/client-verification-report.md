@@ -1,80 +1,14 @@
 # Client Verification Report
 
-## What A Client Can Verify
+Verified locally on 2026-07-15:
 
-This demo can be checked locally without creating accounts, buying subscriptions, or adding an API key.
+- Python source and tests compile successfully.
+- All 39 isolated automated tests pass.
+- Parallel lead creation preserves every record and log entry.
+- Local HTTP integration tests cover intake, errors, limits, routes, methods, and security headers.
+- OpenAI provider tests mock successful, refused, incomplete, transient, and permanent responses without spending API credit.
+- Both portfolio PDFs rebuild from source, pass text/page checks, and were rendered for visual inspection.
 
-## Verification Steps
+CI repeats the test suite on Python 3.11, 3.12, and 3.13 and independently rebuilds both PDFs.
 
-1. Run demo data:
-
-```bash
-python3 src/seed_demo.py
-```
-
-2. Run automated checks:
-
-```bash
-python3 src/test_workflow.py
-```
-
-Expected result:
-
-```text
-All workflow tests passed.
-```
-
-3. Start the dashboard:
-
-```bash
-python3 src/app.py
-```
-
-4. Open:
-
-```text
-http://127.0.0.1:8080
-```
-
-If port `8080` is already busy, start the app with:
-
-```bash
-PORT=8090 python3 src/app.py
-```
-
-Then open:
-
-```text
-http://127.0.0.1:8090
-```
-
-5. Confirm that the dashboard shows lead metrics, lead rows, priority labels, follow-up dates, AI summaries, and CSV export.
-
-6. Submit a new lead from the dashboard form and confirm that the CRM table updates.
-
-7. Test the API:
-
-```bash
-curl http://127.0.0.1:8080/api/health
-```
-
-Expected result:
-
-```json
-{
-  "ok": true,
-  "service": "ai-crm-lead-automation"
-}
-```
-
-## Reliability Features
-
-- Empty message validation
-- Duplicate detection by email
-- Event logging for created leads and duplicates
-- Deterministic demo mode for repeatable testing
-- CSV export for spreadsheet handoff
-
-## What This Demonstrates
-
-This project demonstrates practical CRM automation thinking: intake, extraction, scoring, routing, follow-up planning, dashboard visibility, documentation, and testable delivery.
+One external check is intentionally excluded: a paid live OpenAI request requires the project owner's API key. The default deterministic workflow is fully testable without it.
