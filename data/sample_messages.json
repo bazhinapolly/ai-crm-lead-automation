@@ -1,0 +1,26 @@
+[
+  {
+    "source": "gmail",
+    "message": "Hi, this is Mark from BrightRoof Contractors. We need an automation to capture quote requests from our website and remind our team to follow up. We are trying to start this month and have a budget around $2,000. Please email me at mark@brightroof.example."
+  },
+  {
+    "source": "website_form",
+    "message": "My name is Elena Petrova from Northside Clinic. We get too many appointment requests and want a system that sorts urgent messages, creates follow-up tasks, and sends reminders. Phone: +1 555 210 8844. This is urgent."
+  },
+  {
+    "source": "referral",
+    "message": "Hello, I am Daniel at Studio Apex. We are curious about using AI for customer support, but we are still researching options. Could you send general pricing? daniel@studioapex.example"
+  },
+  {
+    "source": "gmail",
+    "message": "Need help with invoice and PO tracking. Our operations team keeps missing payment follow-ups. We use Google Sheets today and may move to HubSpot later. Contact: Priya, priya.ops@example.com"
+  },
+  {
+    "source": "chat_widget",
+    "message": "Hey, we need a chatbot tomorrow for our ecommerce FAQ. Low budget right now, maybe $100. Can you build it fast?"
+  },
+  {
+    "source": "website_form",
+    "message": "I'm Rachel from GreenBuild Services. We want lead routing from Gmail into a spreadsheet, automatic priority scoring, and weekly dashboard reporting. We can start next week."
+  }
+]
