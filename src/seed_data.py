@@ -8,9 +8,21 @@ from app import build_store
 from config import ROOT_DIR, Settings
 
 
+def load_samples(path) -> list[dict[str, str]]:
+    try:
+        samples = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ValueError("sample input must be readable JSON") from exc
+    if not isinstance(samples, list) or not samples: raise ValueError("sample input must be a non-empty list")
+    for sample in samples:
+        if not isinstance(sample, dict) or set(sample) != {"source", "message"} or not all(isinstance(sample[key], str) and sample[key].strip() for key in ("source", "message")):
+            raise ValueError("every sample must contain non-empty source and message strings")
+    return samples
+
+
 def main() -> None:
     settings = Settings.from_env()
-    samples = json.loads((ROOT_DIR / "data" / "sample_messages.json").read_text(encoding="utf-8"))
+    samples = load_samples(ROOT_DIR / "data" / "sample_messages.json")
     store = build_store(settings)
     store.reset()
     for sample in samples:

@@ -10,4 +10,5 @@ __pycache__/
 .ruff_cache/
 data/leads.json
 data/automation_logs.json
+data/crm_state.json
 tmp/

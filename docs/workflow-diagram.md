@@ -7,13 +7,14 @@ flowchart LR
   C --> D["Contact extraction"]
   C --> E{"Analysis mode"}
   E -->|"Default"| F["Deterministic classifier"]
-  E -->|"Optional"| G["OpenAI Responses API"]
-  G --> H["Strict local schema validation"]
+  E -->|"Optional"| R["Local PII redaction"]
+  R --> G["OpenAI Responses API"]
+  G --> H["Validate + redact generated fields"]
   F --> I["Transparent priority score"]
   H --> I
   D --> J["Thread-safe CRM transaction"]
   I --> J
-  J --> K["Atomic JSON files"]
+  J --> K["Atomic versioned state file"]
   K --> L["Dashboard and JSON API"]
   K --> M["Formula-safe CSV export"]
 ```

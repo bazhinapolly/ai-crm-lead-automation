@@ -10,14 +10,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = [
-    "README.md", "LICENSE", "pyproject.toml", ".env.example", ".gitignore",
+    "README.md", "LICENSE", ".env.example", ".gitignore",
     ".github/workflows/ci.yml", "src/app.py", "src/config.py", "src/lead_ai.py",
     "src/openai_provider.py", "src/storage.py", "tests/test_app.py",
     "tests/test_lead_ai.py", "tests/test_openai_provider.py", "tests/test_storage.py",
-    "docs/privacy-and-operations.md", "tools/build_portfolio_pdfs.py",
+    "tests/test_config_and_startup.py", "config/scoring-policy.json",
+    "evaluations/scoring-cases.json", "docs/privacy-and-operations.md",
+    "docs/scoring-evaluation.md", "tools/evaluate_scoring.py", "tools/build_portfolio_pdfs.py",
 ]
 PDFS = {
-    "AI-CRM-Lead-Automation-Case-Study.pdf": (2, ("AI CRM Lead Automation", "39", "Integration scope")),
+    "AI-CRM-Lead-Automation-Case-Study.pdf": (2, ("AI CRM Lead Automation", "50", "Integration scope")),
     "AI-CRM-Lead-Automation-Technical-Summary.pdf": (1, ("AI CRM Lead Automation", "Responses API", "Production rollout")),
 }
 FORBIDDEN_PDF_WORDING = (

@@ -4,7 +4,9 @@
 
 Lead messages can contain names, email addresses, phone numbers, business details, and free-form personal data. The application stores extracted CRM fields and a bounded analysis summary but excludes the raw message by default. Set `STORE_RAW_MESSAGE=1` only after defining a legitimate purpose, access policy, retention period, and deletion process.
 
-Optional OpenAI mode sends the normalized inquiry text to the configured OpenAI API project for analysis. It sets `store: false`; operators must still review current provider terms and configure their account appropriately before processing real personal data.
+Optional OpenAI mode extracts contact fields locally, then redacts detected names, companies, email addresses, phone numbers, and long account-like numbers before sending the classification-relevant inquiry to the configured OpenAI project. Budget amounts are retained because they affect scoring. Generated summaries and replies are redacted locally again before storage. Pattern-based redaction is best-effort and cannot guarantee anonymization.
+
+Requests set `store: false`, which disables Responses application-state storage for the request. This does not by itself remove separate provider abuse-monitoring logs. Operators must review the current OpenAI data controls, selected project settings, contracts, and applicable law before processing real personal data.
 
 ## Local controls
 
@@ -13,7 +15,7 @@ Optional OpenAI mode sends the normalized inquiry text to the configured OpenAI 
 - JSON media type and object shape are validated.
 - Application errors do not expose tracebacks, provider bodies, or secrets to clients.
 - API keys, raw model responses, and lead text are excluded from logs.
-- JSON writes use a process-local lock and atomic file replacement.
+- Lead records and event logs share one versioned state file and are committed with one atomic replacement under a process-local lock.
 - CSV values that could become spreadsheet formulas are neutralized.
 
 ## Production adaptation checklist

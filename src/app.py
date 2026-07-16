@@ -194,11 +194,15 @@ def build_store(settings: Settings) -> JsonCRM:
     return JsonCRM(settings.data_dir, provider=provider, store_raw_message=settings.store_raw_message)
 
 
+def build_server(settings: Settings) -> ThreadingHTTPServer:
+    return ThreadingHTTPServer((settings.host, settings.port), make_handler(build_store(settings), settings))
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     try:
         settings = Settings.from_env()
-        server = ThreadingHTTPServer((settings.host, settings.port), make_handler(build_store(settings), settings))
+        server = build_server(settings)
     except ValueError as error:
         raise SystemExit(f"Configuration error: {error}") from error
     except OSError as error:

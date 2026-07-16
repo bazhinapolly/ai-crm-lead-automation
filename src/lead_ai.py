@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import re
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Protocol
 
 
@@ -23,6 +25,26 @@ INTENT_VALUES = frozenset(("high_intent", "medium_intent", "low_intent"))
 PROVIDER_KEYS = frozenset(
     ("service_needed", "urgency", "budget_signal", "intent", "ai_summary", "suggested_reply")
 )
+SCORING_POLICY_PATH = Path(__file__).resolve().parents[1] / "config" / "scoring-policy.json"
+
+
+def load_scoring_policy(path: Path = SCORING_POLICY_PATH) -> dict[str, object]:
+    try:
+        policy = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ValueError("scoring policy must be readable JSON") from exc
+    required = {"base_score", "urgency", "budget_signal", "intent", "service_bonus", "priority_thresholds"}
+    if not isinstance(policy, dict) or set(policy) != required:
+        raise ValueError("scoring policy has an invalid schema")
+    thresholds = policy.get("priority_thresholds")
+    if not isinstance(thresholds, dict) or set(thresholds) != {"hot", "warm"}:
+        raise ValueError("scoring policy thresholds are invalid")
+    if not all(isinstance(value, int) for value in thresholds.values()) or not 0 <= thresholds["warm"] < thresholds["hot"] <= 100:
+        raise ValueError("scoring policy thresholds must be ordered integers from 0 to 100")
+    return policy
+
+
+SCORING_POLICY = load_scoring_policy()
 
 
 class AnalysisProvider(Protocol):
@@ -69,7 +91,9 @@ def analyze_lead(
     reply = build_suggested_reply(values["service_needed"], values["urgency"])
 
     if provider is not None:
-        provided = validate_provider_analysis(provider.analyze(text))
+        contact = extract_contact(text)
+        provider_input = redact_sensitive_text(text, contact.values())
+        provided = validate_provider_analysis(provider.analyze(provider_input), contact.values())
         values.update({key: provided[key] for key in ("service_needed", "urgency", "budget_signal", "intent")})
         summary = provided["ai_summary"]
         reply = provided["suggested_reply"]
@@ -91,7 +115,7 @@ def analyze_lead(
     )
 
 
-def validate_provider_analysis(value: object) -> dict[str, str]:
+def validate_provider_analysis(value: object, sensitive_values: object = ()) -> dict[str, str]:
     if not isinstance(value, dict) or set(value) != PROVIDER_KEYS:
         raise ValueError("AI provider returned an invalid analysis schema")
     enum_fields = {
@@ -110,8 +134,20 @@ def validate_provider_analysis(value: object) -> dict[str, str]:
         item = value.get(key)
         if not isinstance(item, str) or not item.strip() or len(item) > limit:
             raise ValueError("AI provider returned invalid generated text")
-        clean[key] = " ".join(item.split())
+        clean[key] = redact_sensitive_text(" ".join(item.split()), sensitive_values)
     return clean
+
+
+def redact_sensitive_text(value: str, sensitive_values: object = ()) -> str:
+    """Best-effort local PII removal for provider input and generated fields."""
+    text = " ".join(value.split())
+    for item in sorted({str(item).strip() for item in sensitive_values if str(item).strip()}, key=len, reverse=True):
+        text = re.sub(re.escape(item), "[redacted]", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}(?![\w.-])", "[email]", text)
+    text = re.sub(r"(?<!\w)\+?\d(?:[\d\s().-]{6,}\d)(?!\w)", "[phone]", text)
+    def redact_long_number(match: re.Match[str]) -> str:
+        return "[long-number]" if sum(character.isdigit() for character in match.group(0)) >= 8 else match.group(0)
+    return re.sub(r"(?<!\w)\d[\d\s.-]{6,}\d(?!\w)", redact_long_number, text)
 
 
 def extract_contact(message: str) -> dict[str, str]:
@@ -156,17 +192,18 @@ def detect_intent(lowered: str) -> str:
 
 
 def score_lead(urgency: str, budget_signal: str, intent: str, service_needed: str) -> int:
-    score = 35
-    score += {"high": 25, "medium": 15, "normal": 5}[urgency]
-    score += {"budget_mentioned": 15, "unknown": 5, "low_budget": -10}[budget_signal]
-    score += {"high_intent": 25, "medium_intent": 10, "low_intent": 0}[intent]
-    if service_needed in {"crm_automation", "google_workspace", "appointment_automation"}:
-        score += 10
+    score = int(SCORING_POLICY["base_score"])
+    score += int(SCORING_POLICY["urgency"][urgency])
+    score += int(SCORING_POLICY["budget_signal"][budget_signal])
+    score += int(SCORING_POLICY["intent"][intent])
+    service_bonus = SCORING_POLICY["service_bonus"]
+    if service_needed in set(service_bonus["services"]): score += int(service_bonus["points"])
     return min(100, max(0, score))
 
 
 def label_priority(score: int) -> str:
-    return "Hot" if score >= 75 else "Warm" if score >= 50 else "Cold"
+    thresholds = SCORING_POLICY["priority_thresholds"]
+    return "Hot" if score >= thresholds["hot"] else "Warm" if score >= thresholds["warm"] else "Cold"
 
 
 def stage_for_priority(label: str) -> str:

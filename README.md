@@ -9,12 +9,13 @@ A portfolio-grade local application that turns inbound messages into structured 
 - Validated `POST /api/intake` endpoint with body limits and safe error responses
 - Deterministic service, urgency, budget, intent, and Hot/Warm/Cold scoring
 - Optional OpenAI Responses API mode with strict JSON Schema and `store: false`
-- Contact extraction, duplicate detection, follow-up planning, and event logs
-- Thread-safe JSON read/modify/write operations and atomic file replacement
+- Local contact extraction, duplicate detection, follow-up planning, and event logs
+- Versioned single-file CRM state with transactional lead-and-event replacement
 - Raw lead messages excluded from storage unless explicitly enabled
+- PII-redacted OpenAI input and local redaction of generated stored fields
 - HTML escaping, constrained CSS classes, security headers, and CSV formula neutralization
 - Responsive local dashboard, JSON endpoints, and CSV handoff
-- 39 isolated standard-library tests and CI on Python 3.11, 3.12, and 3.13
+- 50 isolated tests, coverage enforcement, and CI on Python 3.11, 3.12, and 3.13
 
 ## Local quick start
 
@@ -81,7 +82,13 @@ export OPENAI_MODEL='gpt-4o-mini-2024-07-18'
 python3 src/app.py
 ```
 
-The provider sends only the normalized inquiry text required for classification. It uses the [Responses API](https://developers.openai.com/api/reference/resources/responses/methods/create), [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs), a strict local schema validation pass, bounded transient retries, and redacted error logging. API keys, provider response bodies, and lead text are never written to application logs.
+Contact fields are extracted locally. Before an OpenAI request, the provider input removes detected names and companies plus email addresses, phone numbers, and long account-like numbers. Budget amounts and classification-relevant language are retained. Generated summaries and replies pass through the local redactor again before storage. Redaction is best-effort and must be evaluated against the target intake channel.
+
+The integration uses the [Responses API](https://developers.openai.com/api/reference/resources/responses/methods/create), [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs), `store: false`, strict local validation, bounded transient retries, and content-free provider logging. API keys, provider bodies, and lead text are never written to application logs. Separate OpenAI abuse-monitoring retention remains subject to the configured project's [data controls](https://developers.openai.com/api/docs/guides/your-data).
+
+## Scoring policy and evaluation
+
+Weights, service bonuses, and Hot/Warm/Cold thresholds live in [`config/scoring-policy.json`](config/scoring-policy.json). A balanced synthetic regression set and confusion-matrix evaluator are documented in [`docs/scoring-evaluation.md`](docs/scoring-evaluation.md). The checked deterministic policy result is 15/15; it demonstrates specification conformance, not real-world sales performance. Optional OpenAI evaluation requires the project owner's API key and does not claim an unverified score.
 
 ## Security and deployment boundary
 
@@ -92,13 +99,15 @@ The architecture provides documented integration points for HubSpot, Airtable, G
 ## Project map
 
 ```text
-src/                 application, analysis, provider, and storage
+src/                 local application, analysis, provider, and storage
+config/              versioned lead-scoring policy
 tests/               isolated unit and local HTTP integration tests
+evaluations/         synthetic scoring regression cases
 data/                sample inputs; runtime CRM files are ignored
 docs/                case-study source and operating boundaries
 tools/               PDF builder and repository checks
 output/pdf/          final Upwork-ready portfolio documents
-.github/workflows/   multi-version CI and reproducible PDF build
+.github/workflows/   multi-version CI and validated PDF rebuild
 ```
 
 ## License

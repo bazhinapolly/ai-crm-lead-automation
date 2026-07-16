@@ -1,0 +1,17 @@
+[
+  {"id":"hot-crm-urgent","expected":"Hot","message":"Need CRM automation urgently. Budget is $2000. Please send a quote."},
+  {"id":"hot-appointment-week","expected":"Hot","message":"We need appointment reminders this week and are ready to start."},
+  {"id":"hot-gmail-budget","expected":"Hot","message":"Need Gmail workflow automation immediately. Budget 1500 USD."},
+  {"id":"hot-crm-ready","expected":"Hot","message":"Ready to start a HubSpot lead routing project. Please call tomorrow."},
+  {"id":"hot-calendar-quote","expected":"Hot","message":"Want a booking and calendar workflow soon. Please provide a quote."},
+  {"id":"warm-support-need","expected":"Warm","message":"We need a customer support chatbot for common questions."},
+  {"id":"warm-dashboard-research","expected":"Warm","message":"Researching a reporting dashboard this month for our team."},
+  {"id":"warm-invoice-need","expected":"Warm","message":"Need invoice tracking and purchase order reporting."},
+  {"id":"warm-support-curious","expected":"Warm","message":"Just curious about customer support automation this week."},
+  {"id":"warm-general-budget","expected":"Warm","message":"Budget is $900 for a general business automation project."},
+  {"id":"cold-general-info","expected":"Cold","message":"Hello, please send information about your services."},
+  {"id":"cold-low-budget","expected":"Cold","message":"Information only: looking for the cheapest support option on a low budget."},
+  {"id":"cold-dashboard","expected":"Cold","message":"Dashboard analytics overview."},
+  {"id":"cold-unrelated","expected":"Cold","message":"Good afternoon. I have a general question."},
+  {"id":"cold-research-cheap","expected":"Cold","message":"Just curious and researching the lowest price."}
+]

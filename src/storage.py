@@ -1,4 +1,4 @@
-"""Thread-safe, atomic JSON storage for the local CRM application."""
+"""Thread-safe transactional state storage for the local CRM application."""
 
 from __future__ import annotations
 
@@ -20,6 +20,8 @@ class DataStoreError(RuntimeError):
 
 
 class JsonCRM:
+    SCHEMA_VERSION = 1
+
     def __init__(
         self,
         data_dir: Path,
@@ -28,8 +30,9 @@ class JsonCRM:
         store_raw_message: bool = False,
     ) -> None:
         self.data_dir = Path(data_dir)
-        self.leads_file = self.data_dir / "leads.json"
-        self.logs_file = self.data_dir / "automation_logs.json"
+        self.state_file = self.data_dir / "crm_state.json"
+        self.legacy_leads_file = self.data_dir / "leads.json"
+        self.legacy_logs_file = self.data_dir / "automation_logs.json"
         self.provider = provider
         self.store_raw_message = store_raw_message
         self._lock = threading.RLock()
@@ -38,12 +41,14 @@ class JsonCRM:
     def _ensure_files(self) -> None:
         with self._lock:
             self.data_dir.mkdir(parents=True, exist_ok=True)
-            for path in (self.leads_file, self.logs_file):
-                if not path.exists():
-                    self._atomic_write(path, [])
+            if self.state_file.exists():
+                self._load_state(); return
+            leads = self._load_collection(self.legacy_leads_file) if self.legacy_leads_file.exists() else []
+            logs = self._load_collection(self.legacy_logs_file) if self.legacy_logs_file.exists() else []
+            self._atomic_write_state({"schema_version": self.SCHEMA_VERSION, "leads": leads, "logs": logs})
 
     @staticmethod
-    def _load(path: Path) -> list[dict[str, object]]:
+    def _load_collection(path: Path) -> list[dict[str, object]]:
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
@@ -52,8 +57,22 @@ class JsonCRM:
             raise DataStoreError(f"CRM data in {path.name} must be a list of objects")
         return value
 
+    def _load_state(self) -> dict[str, object]:
+        try:
+            state = json.loads(self.state_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise DataStoreError("Unable to read valid CRM data from crm_state.json") from exc
+        if not isinstance(state, dict) or set(state) != {"schema_version", "leads", "logs"}:
+            raise DataStoreError("CRM data in crm_state.json has an invalid state schema")
+        if state["schema_version"] != self.SCHEMA_VERSION:
+            raise DataStoreError("CRM data in crm_state.json uses an unsupported schema version")
+        for key in ("leads", "logs"):
+            if not isinstance(state[key], list) or any(not isinstance(item, dict) for item in state[key]):
+                raise DataStoreError(f"CRM {key} in crm_state.json must be a list of objects")
+        return state
+
     @staticmethod
-    def _atomic_write(path: Path, records: list[dict[str, object]]) -> None:
+    def _atomic_write(path: Path, records: object) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         handle, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
         try:
@@ -70,13 +89,16 @@ class JsonCRM:
                 pass
             raise
 
+    def _atomic_write_state(self, state: dict[str, object]) -> None:
+        self._atomic_write(self.state_file, state)
+
     def list_leads(self) -> list[dict[str, object]]:
         with self._lock:
-            return sorted(self._load(self.leads_file), key=lambda item: str(item.get("received_at", "")), reverse=True)
+            return sorted(self._load_state()["leads"], key=lambda item: str(item.get("received_at", "")), reverse=True)
 
     def list_logs(self) -> list[dict[str, object]]:
         with self._lock:
-            return sorted(self._load(self.logs_file), key=lambda item: str(item.get("created_at", "")), reverse=True)
+            return sorted(self._load_state()["logs"], key=lambda item: str(item.get("created_at", "")), reverse=True)
 
     def create_lead(self, source: str, message: str, now: dt.datetime | None = None) -> dict[str, object]:
         now = now or dt.datetime.now(dt.timezone.utc)
@@ -96,16 +118,16 @@ class JsonCRM:
             lead["raw_message"] = message
 
         with self._lock:
-            leads = self._load(self.leads_file)
-            logs = self._load(self.logs_file)
+            state = self._load_state()
+            leads = state["leads"]
+            logs = state["logs"]
             duplicate = self.find_duplicate(leads, lead)
             if duplicate:
                 lead["status"] = "Duplicate Review"
                 logs.append(self._event("duplicate_detected", lead_id, f"Possible duplicate of lead {duplicate['id']}", now))
             leads.append(lead)
             logs.append(self._event("lead_created", lead_id, f"Created {lead['priority_label']} lead from {source}", now))
-            self._atomic_write(self.leads_file, leads)
-            self._atomic_write(self.logs_file, logs)
+            self._atomic_write_state(state)
         return lead
 
     @staticmethod
@@ -151,8 +173,7 @@ class JsonCRM:
 
     def reset(self) -> None:
         with self._lock:
-            self._atomic_write(self.leads_file, [])
-            self._atomic_write(self.logs_file, [])
+            self._atomic_write_state({"schema_version": self.SCHEMA_VERSION, "leads": [], "logs": []})
 
 
 def csv_safe(value: object) -> object:

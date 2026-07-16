@@ -1,0 +1,8 @@
+{
+  "base_score": 35,
+  "urgency": {"high": 25, "medium": 15, "normal": 5},
+  "budget_signal": {"budget_mentioned": 15, "unknown": 5, "low_budget": -10},
+  "intent": {"high_intent": 25, "medium_intent": 10, "low_intent": 0},
+  "service_bonus": {"points": 10, "services": ["crm_automation", "google_workspace", "appointment_automation"]},
+  "priority_thresholds": {"hot": 75, "warm": 50}
+}

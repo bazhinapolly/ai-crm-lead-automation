@@ -8,6 +8,7 @@ import threading
 import unittest
 from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 from tests import support  # noqa: F401
 from storage import DataStoreError, JsonCRM
@@ -25,8 +26,7 @@ class StorageTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_creates_data_files(self) -> None:
-        self.assertTrue(self.store.leads_file.exists())
-        self.assertTrue(self.store.logs_file.exists())
+        self.assertTrue(self.store.state_file.exists())
 
     def test_create_lead_does_not_store_raw_message_by_default(self) -> None:
         lead = self.store.create_lead("website", "Need CRM automation. Email a@example.com", NOW)
@@ -53,20 +53,18 @@ class StorageTests(unittest.TestCase):
 
     def test_csv_export_neutralizes_formulas(self) -> None:
         lead = self.store.create_lead("form", "This is =HYPERLINK from Safe Co. Need CRM", NOW)
-        records = json.loads(self.store.leads_file.read_text())
-        records[0]["name"] = " =2+3"
-        self.store._atomic_write(self.store.leads_file, records)
+        state = json.loads(self.store.state_file.read_text()); state["leads"][0]["name"] = " =2+3"; self.store._atomic_write_state(state)
         rows = list(csv.DictReader(StringIO(self.store.export_leads_csv())))
         self.assertEqual(rows[0]["name"], "' =2+3")
 
     def test_corrupt_json_raises_safe_storage_error(self) -> None:
-        self.store.leads_file.write_text("not-json", encoding="utf-8")
-        with self.assertRaisesRegex(DataStoreError, "leads.json"):
+        self.store.state_file.write_text("not-json", encoding="utf-8")
+        with self.assertRaisesRegex(DataStoreError, "crm_state.json"):
             self.store.list_leads()
 
     def test_wrong_json_shape_is_rejected(self) -> None:
-        self.store.leads_file.write_text("{}", encoding="utf-8")
-        with self.assertRaisesRegex(DataStoreError, "list of objects"):
+        self.store.state_file.write_text("{}", encoding="utf-8")
+        with self.assertRaisesRegex(DataStoreError, "state schema"):
             self.store.list_leads()
 
     def test_reset_clears_both_collections(self) -> None:
@@ -83,6 +81,17 @@ class StorageTests(unittest.TestCase):
             thread.join()
         self.assertEqual(len(self.store.list_leads()), 20)
         self.assertEqual(len(self.store.list_logs()), 20)
+
+    def test_lead_and_event_are_committed_in_one_atomic_state_write(self):
+        before=self.store.state_file.read_bytes()
+        with patch.object(self.store,"_atomic_write_state",side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(OSError,"disk full"): self.store.create_lead("form","Need CRM urgently",NOW)
+        self.assertEqual(self.store.state_file.read_bytes(),before); self.assertEqual(self.store.list_leads(),[]); self.assertEqual(self.store.list_logs(),[])
+
+    def test_legacy_collections_are_migrated_to_versioned_state(self):
+        directory=Path(self.temporary.name)/"legacy"; directory.mkdir()
+        (directory/"leads.json").write_text('[{"id":"lead-1"}]',encoding="utf-8"); (directory/"automation_logs.json").write_text('[{"id":"log-1"}]',encoding="utf-8")
+        store=JsonCRM(directory); self.assertEqual(store.list_leads()[0]["id"],"lead-1"); self.assertEqual(store.list_logs()[0]["id"],"log-1"); self.assertEqual(json.loads(store.state_file.read_text())["schema_version"],1)
 
 
 if __name__ == "__main__":
