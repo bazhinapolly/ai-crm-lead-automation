@@ -5,6 +5,7 @@ import json
 import re
 import tempfile
 import threading
+import time
 import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -143,7 +144,7 @@ class AppTests(unittest.TestCase):
         key = "k" * 32
         server = ThreadingHTTPServer(
             ("127.0.0.1", 0),
-            make_handler(self.store, Settings(data_dir=Path(self.temporary.name), local_api_key=key)),
+            make_handler(self.store, Settings(data_dir=Path(self.temporary.name), local_api_key=key, session_ttl_seconds=1, login_failure_max=2)),
         )
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -172,6 +173,7 @@ class AppTests(unittest.TestCase):
                 "POST", "/auth/login", login_body, {"Content-Type": "application/x-www-form-urlencoded"}
             )
             self.assertEqual(status, 303)
+            self.assertIn("Max-Age=1", headers["Set-Cookie"])
             cookie = headers["Set-Cookie"].split(";", 1)[0]
             status, _, dashboard = secured_request("GET", "/", headers={"Cookie": cookie})
             self.assertEqual(status, 200)
@@ -179,6 +181,25 @@ class AppTests(unittest.TestCase):
             intake = json.dumps({"source": "form", "message": "Need a dashboard"}).encode()
             self.assertEqual(secured_request("POST", "/api/intake", intake, {"Cookie": cookie, "Content-Type": "application/json"})[0], 403)
             self.assertEqual(secured_request("POST", "/api/intake", intake, {"Cookie": cookie, "Content-Type": "application/json", "X-CSRF-Token": csrf})[0], 201)
+            self.assertEqual(secured_request("POST", "/auth/logout", headers={"Cookie": cookie})[0], 403)
+            logout = secured_request("POST", "/auth/logout", headers={"Cookie": cookie, "X-CSRF-Token": csrf})
+            self.assertEqual(logout[0], 303)
+            self.assertIn("Max-Age=0", logout[1]["Set-Cookie"])
+            self.assertEqual(secured_request("GET", "/", headers={"Cookie": cookie})[0], 303)
+
+            attempts = [
+                secured_request("POST", "/auth/login", b"api_key=wrong", {"Content-Type": "application/x-www-form-urlencoded"})[0]
+                for _ in range(3)
+            ]
+            self.assertEqual(attempts, [401, 401, 429])
+
+            status, headers, _ = secured_request(
+                "POST", "/auth/login", login_body, {"Content-Type": "application/x-www-form-urlencoded"}
+            )
+            self.assertEqual(status, 303)
+            expiring_cookie = headers["Set-Cookie"].split(";", 1)[0]
+            time.sleep(1.1)
+            self.assertEqual(secured_request("GET", "/", headers={"Cookie": expiring_cookie})[0], 303)
         finally:
             server.shutdown()
             server.server_close()

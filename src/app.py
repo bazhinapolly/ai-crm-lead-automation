@@ -8,6 +8,7 @@ import html
 import json
 import logging
 import secrets
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -38,8 +39,23 @@ def validate_intake(payload: object, max_message_chars: int) -> tuple[str, str]:
 
 
 def make_handler(store: JsonCRM, settings: Settings) -> type[BaseHTTPRequestHandler]:
-    sessions: dict[str, str] = {}
+    sessions: dict[str, dict[str, str | float]] = {}
+    login_failures: dict[str, dict[str, float | int]] = {}
     local_csrf_token = secrets.token_urlsafe(32)
+
+    def record_login_failure(client_key: str) -> tuple[bool, int]:
+        now = time.monotonic()
+        bucket = login_failures.get(client_key)
+        if not bucket or now >= float(bucket["reset_at"]):
+            bucket = {"count": 0, "reset_at": now + settings.login_failure_window_seconds}
+        bucket["count"] = int(bucket["count"]) + 1
+        login_failures[client_key] = bucket
+        if len(login_failures) > 64:
+            oldest = min(login_failures, key=lambda key: float(login_failures[key]["reset_at"]))
+            if oldest != client_key:
+                login_failures.pop(oldest, None)
+        retry_after = max(1, int(float(bucket["reset_at"]) - now + 0.999))
+        return int(bucket["count"]) <= settings.login_failure_max, retry_after
 
     class CRMHandler(BaseHTTPRequestHandler):
         server_version = "CRMApplication/2.0"
@@ -83,6 +99,9 @@ def make_handler(store: JsonCRM, settings: Settings) -> type[BaseHTTPRequestHand
             route = urlparse(self.path).path
             if route == "/auth/login":
                 self._login()
+                return
+            if route == "/auth/logout":
+                self._logout()
                 return
             if route not in {"/api/intake", "/api/maintenance/purge"}:
                 self.send_json({"error": "not_found"}, HTTPStatus.NOT_FOUND)
@@ -144,12 +163,23 @@ def make_handler(store: JsonCRM, settings: Settings) -> type[BaseHTTPRequestHand
             if authorization.startswith("Bearer ") and hmac.compare_digest(authorization[7:], settings.local_api_key):
                 return "bearer", None
             cookie = self.headers.get("Cookie", "")
-            session_token = next(
-                (part.split("=", 1)[1] for part in cookie.split(";") if part.strip().startswith("crm_session=")),
+            session_token = self._session_token(cookie)
+            session = sessions.get(session_token)
+            now = time.monotonic()
+            if not session or now >= float(session["expires_at"]):
+                if session_token:
+                    sessions.pop(session_token, None)
+                return None, None
+            session["last_seen"] = now
+            session["expires_at"] = now + settings.session_ttl_seconds
+            return "session", str(session["csrf"])
+
+        @staticmethod
+        def _session_token(cookie: str) -> str:
+            return next(
+                (part.strip().split("=", 1)[1] for part in cookie.split(";") if part.strip().startswith("crm_session=")),
                 "",
             )
-            csrf_token = sessions.get(session_token)
-            return ("session", csrf_token) if csrf_token else (None, None)
 
         def _authentication_required(self, route: str) -> None:
             if route == "/":
@@ -176,16 +206,52 @@ def make_handler(store: JsonCRM, settings: Settings) -> type[BaseHTTPRequestHand
             payload = parse_qs(self.rfile.read(length).decode("utf-8", errors="replace"))
             supplied = payload.get("api_key", [""])[0]
             if not hmac.compare_digest(supplied, settings.local_api_key):
+                allowed, retry_after = record_login_failure(self.client_address[0])
+                if not allowed:
+                    self._send(
+                        render_login("Too many failed sign-in attempts. Try again later."),
+                        "text/html; charset=utf-8",
+                        HTTPStatus.TOO_MANY_REQUESTS,
+                        {"Retry-After": str(retry_after)},
+                    )
+                    return
                 self._send(render_login("Invalid local access key."), "text/html; charset=utf-8", HTTPStatus.UNAUTHORIZED)
                 return
+            login_failures.pop(self.client_address[0], None)
             session_token = secrets.token_urlsafe(32)
             csrf_token = secrets.token_urlsafe(32)
             if len(sessions) >= 64:
                 sessions.pop(next(iter(sessions)))
-            sessions[session_token] = csrf_token
+            now = time.monotonic()
+            sessions[session_token] = {
+                "csrf": csrf_token,
+                "created_at": now,
+                "last_seen": now,
+                "expires_at": now + settings.session_ttl_seconds,
+            }
             self.send_response(HTTPStatus.SEE_OTHER)
             self.send_header("Location", "/")
-            self.send_header("Set-Cookie", f"crm_session={session_token}; HttpOnly; SameSite=Strict; Path=/")
+            self.send_header("Set-Cookie", f"crm_session={session_token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={settings.session_ttl_seconds}")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+
+        def _logout(self) -> None:
+            if not settings.local_api_key:
+                self.send_json({"error": "not_found"}, HTTPStatus.NOT_FOUND)
+                return
+            auth_mode, csrf_token = self._authentication()
+            if auth_mode != "session":
+                self.send_json({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            try:
+                self._require_csrf(auth_mode, csrf_token)
+            except RequestError as error:
+                self.send_json({"error": error.code}, error.status)
+                return
+            sessions.pop(self._session_token(self.headers.get("Cookie", "")), None)
+            self.send_response(HTTPStatus.SEE_OTHER)
+            self.send_header("Location", "/login")
+            self.send_header("Set-Cookie", "crm_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import json
+import multiprocessing
 import tempfile
 import threading
 import unittest
@@ -15,6 +16,12 @@ from storage import DataStoreError, JsonCRM
 
 
 NOW = dt.datetime(2026, 7, 2, 12, tzinfo=dt.timezone.utc)
+
+
+def create_lead_in_process(data_dir: str, barrier, index: int) -> None:
+    store = JsonCRM(Path(data_dir))
+    barrier.wait(timeout=15)
+    store.create_lead("process", f"Need CRM process {index}", NOW + dt.timedelta(seconds=index))
 
 
 class StorageTests(unittest.TestCase):
@@ -55,11 +62,11 @@ class StorageTests(unittest.TestCase):
         today = dt.date(2026, 7, 10)
         state = json.loads(self.store.state_file.read_text())
         state["leads"] = [
-            {"id": "today", "follow_up_date": "2026-07-10", "status": "New"},
-            {"id": "late", "follow_up_date": "2026-07-09", "status": "Qualified"},
-            {"id": "closed", "follow_up_date": "2026-07-09", "status": "Closed Won"},
-            {"id": "duplicate", "follow_up_date": "2026-07-09", "status": "Duplicate Review"},
-            {"id": "future", "follow_up_date": "2026-07-11", "status": "New"},
+            {"id": "today", "received_at": NOW.isoformat(), "follow_up_date": "2026-07-10", "status": "New"},
+            {"id": "late", "received_at": NOW.isoformat(), "follow_up_date": "2026-07-09", "status": "Qualified"},
+            {"id": "closed", "received_at": NOW.isoformat(), "follow_up_date": "2026-07-09", "status": "Closed Won"},
+            {"id": "duplicate", "received_at": NOW.isoformat(), "follow_up_date": "2026-07-09", "status": "Duplicate Review"},
+            {"id": "future", "received_at": NOW.isoformat(), "follow_up_date": "2026-07-11", "status": "New"},
         ]
         self.store._atomic_write_state(state)
         metrics = self.store.pipeline_metrics(today)
@@ -116,6 +123,23 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(len(self.store.list_leads()), 20)
         self.assertEqual(len(self.store.list_logs()), 20)
 
+    def test_multiple_processes_do_not_lose_records_or_events(self) -> None:
+        context = multiprocessing.get_context("spawn")
+        process_count = 6
+        barrier = context.Barrier(process_count + 1)
+        processes = [
+            context.Process(target=create_lead_in_process, args=(self.temporary.name, barrier, index))
+            for index in range(process_count)
+        ]
+        for process in processes:
+            process.start()
+        barrier.wait(timeout=15)
+        for process in processes:
+            process.join(timeout=20)
+            self.assertEqual(process.exitcode, 0)
+        self.assertEqual(len(self.store.list_leads()), process_count)
+        self.assertEqual(len(self.store.list_logs()), process_count)
+
     def test_lead_and_event_are_committed_in_one_atomic_state_write(self):
         before=self.store.state_file.read_bytes()
         with patch.object(self.store,"_atomic_write_state",side_effect=OSError("disk full")):
@@ -124,8 +148,25 @@ class StorageTests(unittest.TestCase):
 
     def test_legacy_collections_are_migrated_to_versioned_state(self):
         directory=Path(self.temporary.name)/"legacy"; directory.mkdir()
-        (directory/"leads.json").write_text('[{"id":"lead-1"}]',encoding="utf-8"); (directory/"automation_logs.json").write_text('[{"id":"log-1"}]',encoding="utf-8")
+        (directory/"leads.json").write_text('[{"id":"lead-1","received_at":"2026-01-01T00:00:00+00:00","email":"legacy@example.com"}]',encoding="utf-8"); (directory/"automation_logs.json").write_text('[{"id":"log-1"}]',encoding="utf-8")
         store=JsonCRM(directory); self.assertEqual(store.list_leads()[0]["id"],"lead-1"); self.assertEqual(store.list_logs()[0]["id"],"log-1"); self.assertEqual(json.loads(store.state_file.read_text())["schema_version"],1)
+        self.assertFalse((directory/"leads.json").exists()); self.assertFalse((directory/"automation_logs.json").exists())
+        store.purge_expired(dt.datetime(2026,7,17,tzinfo=dt.timezone.utc))
+        self.assertFalse(any("legacy@example.com" in path.read_text(encoding="utf-8") for path in directory.glob("*.json")))
+
+    def test_failed_migration_preserves_legacy_files(self):
+        directory=Path(self.temporary.name)/"failed-migration"; directory.mkdir()
+        legacy=directory/"leads.json"; legacy.write_text('[{"id":"lead-1","received_at":"2026-01-01T00:00:00+00:00"}]',encoding="utf-8")
+        with patch.object(JsonCRM,"_atomic_write_state",side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(OSError,"disk full"): JsonCRM(directory)
+        self.assertTrue(legacy.exists()); self.assertFalse((directory/"crm_state.json").exists())
+
+    def test_invalid_or_timezone_free_received_at_fails_instead_of_retaining_silently(self):
+        for value in ("not-a-date", "2026-01-01T00:00:00", ""):
+            with self.subTest(value=value):
+                state={"schema_version":1,"leads":[{"id":"bad","received_at":value}],"logs":[]}
+                self.store.state_file.write_text(json.dumps(state),encoding="utf-8")
+                with self.assertRaisesRegex(DataStoreError,"received_at"): self.store.purge_expired(NOW)
 
 
 if __name__ == "__main__":

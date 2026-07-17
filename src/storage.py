@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
+import fcntl
 import json
 import os
 import tempfile
 import threading
 import uuid
+from contextlib import contextmanager
 from io import StringIO
 from pathlib import Path
 
@@ -21,6 +23,8 @@ class DataStoreError(RuntimeError):
 
 class JsonCRM:
     SCHEMA_VERSION = 1
+    _registry_guard = threading.Lock()
+    _path_locks: dict[str, threading.RLock] = {}
 
     def __init__(
         self,
@@ -32,22 +36,48 @@ class JsonCRM:
     ) -> None:
         self.data_dir = Path(data_dir)
         self.state_file = self.data_dir / "crm_state.json"
+        self.lock_file = self.data_dir / ".crm_state.lock"
         self.legacy_leads_file = self.data_dir / "leads.json"
         self.legacy_logs_file = self.data_dir / "automation_logs.json"
         self.provider = provider
         self.store_raw_message = store_raw_message
         self.retention_days = retention_days
-        self._lock = threading.RLock()
+        lock_key = str(self.data_dir.expanduser().resolve())
+        with self._registry_guard:
+            self._lock = self._path_locks.setdefault(lock_key, threading.RLock())
         self._ensure_files()
 
-    def _ensure_files(self) -> None:
+    @contextmanager
+    def _state_lock(self, *, exclusive: bool):
+        """Coordinate every state transaction across threads, instances, and processes."""
         with self._lock:
             self.data_dir.mkdir(parents=True, exist_ok=True)
+            with self.lock_file.open("a+", encoding="utf-8") as lock_stream:
+                fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
+
+    def _ensure_files(self) -> None:
+        with self._state_lock(exclusive=True):
             if self.state_file.exists():
-                self._load_state(); return
+                self._load_state()
+                self._cleanup_legacy_files()
+                return
             leads = self._load_collection(self.legacy_leads_file) if self.legacy_leads_file.exists() else []
             logs = self._load_collection(self.legacy_logs_file) if self.legacy_logs_file.exists() else []
-            self._atomic_write_state({"schema_version": self.SCHEMA_VERSION, "leads": leads, "logs": logs})
+            state = {"schema_version": self.SCHEMA_VERSION, "leads": leads, "logs": logs}
+            self._validate_state(state)
+            self._atomic_write_state(state)
+            self._cleanup_legacy_files()
+
+    def _cleanup_legacy_files(self) -> None:
+        try:
+            self.legacy_leads_file.unlink(missing_ok=True)
+            self.legacy_logs_file.unlink(missing_ok=True)
+        except OSError as exc:
+            raise DataStoreError("Migrated legacy CRM files could not be removed") from exc
 
     @staticmethod
     def _load_collection(path: Path) -> list[dict[str, object]]:
@@ -64,6 +94,10 @@ class JsonCRM:
             state = json.loads(self.state_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise DataStoreError("Unable to read valid CRM data from crm_state.json") from exc
+        self._validate_state(state)
+        return state
+
+    def _validate_state(self, state: object) -> None:
         if not isinstance(state, dict) or set(state) != {"schema_version", "leads", "logs"}:
             raise DataStoreError("CRM data in crm_state.json has an invalid state schema")
         if state["schema_version"] != self.SCHEMA_VERSION:
@@ -71,7 +105,21 @@ class JsonCRM:
         for key in ("leads", "logs"):
             if not isinstance(state[key], list) or any(not isinstance(item, dict) for item in state[key]):
                 raise DataStoreError(f"CRM {key} in crm_state.json must be a list of objects")
-        return state
+        for lead in state["leads"]:
+            self._parse_received_at(lead)
+
+    @staticmethod
+    def _parse_received_at(lead: dict[str, object]) -> dt.datetime:
+        value = lead.get("received_at")
+        if not isinstance(value, str) or not value:
+            raise DataStoreError("CRM lead has a missing or invalid received_at timestamp")
+        try:
+            parsed = dt.datetime.fromisoformat(value)
+        except ValueError as exc:
+            raise DataStoreError("CRM lead has a missing or invalid received_at timestamp") from exc
+        if parsed.tzinfo is None:
+            raise DataStoreError("CRM lead received_at timestamp must include a timezone")
+        return parsed
 
     @staticmethod
     def _atomic_write(path: Path, records: object) -> None:
@@ -95,11 +143,11 @@ class JsonCRM:
         self._atomic_write(self.state_file, state)
 
     def list_leads(self) -> list[dict[str, object]]:
-        with self._lock:
+        with self._state_lock(exclusive=False):
             return sorted(self._load_state()["leads"], key=lambda item: str(item.get("received_at", "")), reverse=True)
 
     def list_logs(self) -> list[dict[str, object]]:
-        with self._lock:
+        with self._state_lock(exclusive=False):
             return sorted(self._load_state()["logs"], key=lambda item: str(item.get("created_at", "")), reverse=True)
 
     def create_lead(self, source: str, message: str, now: dt.datetime | None = None) -> dict[str, object]:
@@ -119,7 +167,7 @@ class JsonCRM:
         if self.store_raw_message:
             lead["raw_message"] = message
 
-        with self._lock:
+        with self._state_lock(exclusive=True):
             state = self._load_state()
             leads = state["leads"]
             logs = state["logs"]
@@ -172,13 +220,13 @@ class JsonCRM:
         }
 
     def export_lead(self, lead_id: str) -> dict[str, object] | None:
-        with self._lock:
+        with self._state_lock(exclusive=False):
             lead = next((item for item in self._load_state()["leads"] if item.get("id") == lead_id), None)
             return dict(lead) if lead else None
 
     def delete_lead(self, lead_id: str, now: dt.datetime | None = None) -> bool:
         now = now or dt.datetime.now(dt.timezone.utc)
-        with self._lock:
+        with self._state_lock(exclusive=True):
             state = self._load_state()
             original = len(state["leads"])
             state["leads"] = [item for item in state["leads"] if item.get("id") != lead_id]
@@ -190,19 +238,15 @@ class JsonCRM:
 
     def purge_expired(self, now: dt.datetime | None = None) -> list[str]:
         now = now or dt.datetime.now(dt.timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=dt.timezone.utc)
         cutoff = now - dt.timedelta(days=self.retention_days)
-        with self._lock:
+        with self._state_lock(exclusive=True):
             state = self._load_state()
             retained = []
             removed_ids = []
             for lead in state["leads"]:
-                try:
-                    received_at = dt.datetime.fromisoformat(str(lead.get("received_at", "")))
-                    if received_at.tzinfo is None:
-                        received_at = received_at.replace(tzinfo=dt.timezone.utc)
-                except ValueError:
-                    retained.append(lead)
-                    continue
+                received_at = self._parse_received_at(lead)
                 if received_at < cutoff:
                     removed_ids.append(str(lead.get("id", "")))
                 else:
@@ -229,7 +273,7 @@ class JsonCRM:
         return output.getvalue()
 
     def reset(self) -> None:
-        with self._lock:
+        with self._state_lock(exclusive=True):
             self._atomic_write_state({"schema_version": self.SCHEMA_VERSION, "leads": [], "logs": []})
 
 

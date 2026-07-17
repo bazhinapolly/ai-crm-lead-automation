@@ -11,4 +11,5 @@ __pycache__/
 data/leads.json
 data/automation_logs.json
 data/crm_state.json
+data/.crm_state.lock
 tmp/

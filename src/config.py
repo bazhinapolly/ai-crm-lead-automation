@@ -42,6 +42,9 @@ class Settings:
     openai_timeout_seconds: int = 20
     local_api_key: str = ""
     contact_retention_days: int = 90
+    session_ttl_seconds: int = 3600
+    login_failure_window_seconds: int = 60
+    login_failure_max: int = 5
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -77,4 +80,7 @@ class Settings:
             openai_timeout_seconds=_int("OPENAI_TIMEOUT_SECONDS", 20, 1, 120),
             local_api_key=local_api_key,
             contact_retention_days=_int("CONTACT_RETENTION_DAYS", 90, 1, 3650),
+            session_ttl_seconds=_int("SESSION_TTL_SECONDS", 3600, 1, 86400),
+            login_failure_window_seconds=_int("LOGIN_FAILURE_WINDOW_SECONDS", 60, 1, 3600),
+            login_failure_max=_int("LOGIN_FAILURE_MAX", 5, 1, 100),
         )
