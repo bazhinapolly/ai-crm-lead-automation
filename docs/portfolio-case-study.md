@@ -24,7 +24,7 @@ Two analysis modes share the same validated contract:
 - HTML escaping and allowlisted priority classes in the dashboard
 - Spreadsheet formula neutralization in CSV exports
 - Raw inquiry retention disabled by default as a privacy boundary
-- 69 automated tests, 90% overall coverage enforcement, and CI on Python 3.11, 3.12, and 3.13
+- 76 automated tests, 90% overall coverage enforcement, and CI on Python 3.11, 3.12, and 3.13
 
 ## Outcome
 
@@ -32,4 +32,4 @@ The result is a credible, inspectable lead-triage architecture designed for adap
 
 ## Scope boundary
 
-The project is a single-machine local application with documented integration points for Gmail, HubSpot, Airtable, Google Sheets, Pipedrive, GoHighLevel, Zapier, Make, and n8n. Production rollout makes authentication and authorization mandatory and adds TLS, managed persistence, rate limiting, monitoring, backups, and formal data lifecycle controls. No client deployment, client acceptance, or measured business outcome is claimed.
+The project is a single-machine local application. Its JSON API and CSV export are implemented integration boundaries; platform-specific connectors are not implemented. Production rollout selects an official target API and adds authentication, authorization, field mapping, idempotency, reconciliation, TLS, managed persistence, distributed rate limiting, monitoring, backups, and formal data lifecycle controls. No client deployment, client acceptance, or measured business outcome is claimed.

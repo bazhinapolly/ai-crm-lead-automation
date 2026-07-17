@@ -26,6 +26,12 @@ PROVIDER_KEYS = frozenset(
     ("service_needed", "urgency", "budget_signal", "intent", "ai_summary", "suggested_reply")
 )
 SCORING_POLICY_PATH = Path(__file__).resolve().parents[1] / "config" / "scoring-policy.json"
+EMAIL_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9.!#$%&'*+/=?^_`{|}~-])"
+    r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
+    r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
+    r"[A-Za-z]{2,63}(?![A-Za-z0-9-])"
+)
 
 
 def load_scoring_policy(path: Path = SCORING_POLICY_PATH) -> dict[str, object]:
@@ -173,7 +179,7 @@ def redact_sensitive_text(value: str, sensitive_values: object = ()) -> str:
     text = " ".join(value.split())
     for item in sorted({str(item).strip() for item in sensitive_values if str(item).strip()}, key=len, reverse=True):
         text = re.sub(re.escape(item), "[redacted]", text, flags=re.IGNORECASE)
-    text = re.sub(r"(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}(?![\w.-])", "[email]", text)
+    text = EMAIL_PATTERN.sub("[email]", text)
     text = re.sub(r"(?<!\w)\+?\d(?:[\d\s().-]{6,}\d)(?!\w)", "[phone]", text)
     def redact_long_number(match: re.Match[str]) -> str:
         return "[long-number]" if sum(character.isdigit() for character in match.group(0)) >= 8 else match.group(0)
@@ -181,7 +187,7 @@ def redact_sensitive_text(value: str, sensitive_values: object = ()) -> str:
 
 
 def extract_contact(message: str) -> dict[str, str]:
-    email = re.search(r"(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}(?![\w.-])", message)
+    email = EMAIL_PATTERN.search(message)
     phone = re.search(r"(?<!\w)(\+?\d(?:[\d\s().-]{6,}\d))(?!\w)", message)
     return {
         "name": extract_name(message),

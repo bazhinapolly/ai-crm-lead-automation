@@ -20,8 +20,8 @@ REQUIRED = [
     "tools/evaluate_scoring.py", "tools/build_portfolio_pdfs.py",
 ]
 PDFS = {
-    "AI-CRM-Lead-Automation-Case-Study.pdf": (2, ("AI CRM Lead Automation", "69", "interprocess", "Integration scope")),
-    "AI-CRM-Lead-Automation-Technical-Summary.pdf": (1, ("AI CRM Lead Automation", "interprocess file lock", "f892334", "Production rollout")),
+    "AI-CRM-Lead-Automation-Case-Study.pdf": (2, ("AI CRM Lead Automation", "76", "interprocess", "Integration scope")),
+    "AI-CRM-Lead-Automation-Technical-Summary.pdf": (1, ("AI CRM Lead Automation", "interprocess file lock", "v2.1.0", "Production rollout")),
 }
 FORBIDDEN_PDF_WORDING = (
     r"\bdemo\b",

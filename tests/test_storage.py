@@ -46,8 +46,10 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(lead["raw_message"], "Need a report")
 
     def test_duplicate_email_marks_second_lead(self) -> None:
-        self.store.create_lead("form", "Need CRM. Email Case@Example.com", NOW)
-        second = self.store.create_lead("chat", "Need reports. Email case@example.com", NOW)
+        first = self.store.create_lead("form", "Need CRM. Email Case@Example.com.", NOW)
+        second = self.store.create_lead("chat", "Need reports. Email (case@example.com).", NOW)
+        self.assertEqual(first["email"], "Case@Example.com")
+        self.assertEqual(second["email"], "case@example.com")
         self.assertEqual(second["status"], "Duplicate Review")
         self.assertEqual([log["event_type"] for log in self.store.list_logs()].count("duplicate_detected"), 1)
 

@@ -52,7 +52,7 @@ class LeadAnalysisTests(unittest.TestCase):
     def test_provider_input_and_generated_fields_are_redacted(self):
         class PIIProvider(StubProvider):
             def analyze(self,message):
-                self.last_message=message; result=super().analyze(message); result["ai_summary"]="Contact Alice at alice@example.com or +1 (212) 555-0199."; result["suggested_reply"]="Hi Alice, account 123456789012 is ready."; return result
+                self.last_message=message; result=super().analyze(message); result["ai_summary"]="Contact Alice at alice@example.com. Phone +1 (212) 555-0199."; result["suggested_reply"]="Hi Alice, account 123456789012 is ready."; return result
         provider=PIIProvider(); result=analyze_lead("This is Alice from Acme Ltd. Need CRM urgently. Email alice@example.com or +1 (212) 555-0199.",NOW,provider)
         self.assertNotIn("Alice",provider.last_message); self.assertNotIn("alice@example.com",provider.last_message); self.assertNotIn("555-0199",provider.last_message); self.assertNotIn("alice@example.com",result.ai_summary); self.assertNotIn("555-0199",result.ai_summary); self.assertNotIn("Alice",result.suggested_reply); self.assertNotIn("123456789012",result.suggested_reply)
 
@@ -79,6 +79,15 @@ class LeadAnalysisTests(unittest.TestCase):
 
     def test_generic_redactor_preserves_budget_but_removes_account_number(self):
         value=redact_sensitive_text("Budget $1800, account 1234 5678 9012, email a@example.com"); self.assertIn("$1800",value); self.assertNotIn("1234 5678 9012",value); self.assertNotIn("a@example.com",value)
+
+    def test_email_redaction_handles_sentence_punctuation_and_multiple_addresses(self):
+        value = redact_sensitive_text(
+            "Primary name+sales@eu.example.co.uk. Backup second@example.com, and (third@example.org)."
+        )
+        self.assertNotIn("@", value)
+        self.assertEqual(value.count("[email]"), 3)
+        self.assertIn("[email].", value)
+        self.assertIn("([email])", value)
 
     def test_empty_message_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "required"):
@@ -111,6 +120,24 @@ class ContactExtractionTests(unittest.TestCase):
 
     def test_does_not_accept_broken_email(self) -> None:
         self.assertEqual(extract_contact("write to name@example")["email"], "")
+
+    def test_email_extraction_excludes_trailing_punctuation(self) -> None:
+        cases = {
+            "Email name@example.com.": "name@example.com",
+            "Email (name@example.com)": "name@example.com",
+            "Email name@example.com, please reply": "name@example.com",
+            "Email name@example.com; today": "name@example.com",
+            'Email "name@example.com"': "name@example.com",
+            "Email name+sales@eu.example.co.uk.": "name+sales@eu.example.co.uk",
+        }
+        for message, expected in cases.items():
+            with self.subTest(message=message):
+                self.assertEqual(extract_contact(message)["email"], expected)
+
+    def test_first_of_multiple_emails_is_extracted_and_all_are_redacted(self) -> None:
+        message = "Use first@example.com or second@example.org."
+        self.assertEqual(extract_contact(message)["email"], "first@example.com")
+        self.assertNotIn("@", redact_sensitive_text(message))
 
     def test_missing_contact_fields_are_empty(self) -> None:
         self.assertEqual(extract_contact("Need a dashboard"), {"name": "", "email": "", "phone": "", "company": ""})

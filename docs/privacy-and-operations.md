@@ -15,7 +15,8 @@ Requests set `store: false`, which disables Responses application-state storage 
 ## Local controls
 
 - Numeric loopback binding is enforced.
-- A strong optional local key protects bearer API access and browser sessions; sessions have a sliding TTL and logout, session-authenticated writes require CSRF tokens, and failed sign-ins are throttled.
+- A strong optional local key protects bearer API access and browser sessions; sessions have a sliding TTL and logout, session-authenticated writes require CSRF tokens, and failed sign-ins are throttled with thread-safe state.
+- A bounded per-IP intake limiter applies in both modes; optional OpenAI mode also caps concurrent provider calls and returns `429` with `Retry-After` when either control is reached.
 - Request bodies and normalized message length are bounded.
 - JSON media type and object shape are validated.
 - Application errors do not expose tracebacks, provider bodies, or secrets to clients.

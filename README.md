@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/bazhinapolly/ai-crm-lead-automation/actions/workflows/ci.yml/badge.svg)](https://github.com/bazhinapolly/ai-crm-lead-automation/actions/workflows/ci.yml)
 
-A portfolio-grade local application that turns inbound messages into structured CRM records, priorities, follow-up dates, and safe CSV exports. It works offline and at zero API cost by default; an optional OpenAI Responses API provider adds strict Structured Outputs without changing the CRM contract.
+A local-first application that turns inbound messages into structured CRM records, priorities, follow-up dates, and safe CSV exports. It works offline and at zero API cost by default; an optional OpenAI Responses API provider adds strict Structured Outputs without changing the CRM contract.
 
 ## What is implemented
 
@@ -14,12 +14,13 @@ A portfolio-grade local application that turns inbound messages into structured 
 - Versioned single-file CRM state with interprocess locking and transactional lead-and-event replacement
 - Safe legacy migration that removes old PII files only after a validated successful commit
 - Optional local bearer/browser-session authentication with CSRF, sliding TTL, logout, and login throttling
+- Thread-safe, bounded per-IP intake limiting plus a configurable cap on concurrent OpenAI calls
 - Configurable contact retention plus export/delete-by-ID and explicit purge operations
 - Raw lead messages excluded from storage unless explicitly enabled
 - Best-effort PII redaction before OpenAI and local redaction of generated stored fields
 - HTML escaping, constrained CSS classes, security headers, and CSV formula neutralization
 - Responsive local dashboard, JSON endpoints, and CSV handoff
-- 69 isolated tests, 90% coverage enforcement, and CI on Python 3.11, 3.12, and 3.13
+- 76 isolated tests, 90% coverage enforcement, and CI on Python 3.11, 3.12, and 3.13
 
 ## Local quick start
 
@@ -33,6 +34,10 @@ python3 src/app.py
 `--reset` is intentionally destructive: it clears existing local CRM state before loading the synthetic portfolio records. Without `--reset`, the seed command refuses to overwrite nonempty state and safely seeds an empty store.
 
 Open <http://127.0.0.1:8080>. Use `PORT=8090 python3 src/app.py` if port 8080 is busy.
+
+![CRM dashboard populated with six fictional leads](docs/assets/crm-dashboard.png)
+
+The screenshot is generated from deterministic mode with the repository's fictional seed records; it is not client data or evidence of a client deployment.
 
 Runtime leads and logs are created under `data/` and ignored by Git. To keep local data elsewhere:
 
@@ -107,6 +112,8 @@ python3 src/app.py
 
 Contact fields are extracted locally with conservative, case-sensitive name/company rules. Before an OpenAI request, detected high-confidence contacts plus email addresses, phone numbers, and long account-like numbers are best-effort redacted. Budget amounts and classification-relevant urgency/intent language are retained. Generated summaries and replies pass through the local redactor again before storage. Pattern-based processing is not an anonymization guarantee and must be evaluated against the target intake channel.
 
+`POST /api/intake` has a bounded, thread-safe per-IP fixed-window limit in both modes. In OpenAI mode, `OPENAI_MAX_CONCURRENCY` additionally caps simultaneous provider calls; excess requests receive `429` with `Retry-After` instead of creating an unbounded paid queue. The in-memory controls are appropriate for this single-process local application; a multi-instance deployment requires a shared limiter.
+
 The integration uses the [Responses API](https://developers.openai.com/api/reference/resources/responses/methods/create), [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs), `store: false`, strict local validation, bounded transient retries, and content-free provider logging. API keys, provider bodies, and lead text are never written to application logs. Separate OpenAI abuse-monitoring retention remains subject to the configured project's [data controls](https://developers.openai.com/api/docs/guides/your-data).
 
 ## Scoring policy and evaluation
@@ -115,11 +122,11 @@ Weights, service bonuses, and Hot/Warm/Cold thresholds live in [`config/scoring-
 
 ## Security and deployment boundary
 
-This local-first application intentionally binds to a single machine and now provides optional local authentication, browser sessions, CSRF controls, and explicit contact lifecycle operations. Production rollout still requires mandatory identity and authorization, tenant isolation, TLS, a managed database, automated retention, rate limiting, observability, backups, and the target CRM's official API. See [`docs/privacy-and-operations.md`](docs/privacy-and-operations.md).
+This local-first application intentionally binds to a single machine and provides optional local authentication, browser sessions, CSRF controls, bounded intake/provider concurrency, and explicit contact lifecycle operations. Production rollout still requires mandatory identity and authorization, tenant isolation, TLS, a managed database, automated retention, distributed rate limiting, observability, backups, and the target CRM's official API. See [`docs/privacy-and-operations.md`](docs/privacy-and-operations.md).
 
-The architecture provides documented integration points for HubSpot, Airtable, Google Sheets, Gmail, Zapier, Make, and n8n connectors selected for a client environment.
+The JSON API and CSV export are the implemented integration boundaries. Platform-specific Gmail, CRM, spreadsheet, and automation connectors are not implemented in this repository; a client adaptation selects one official API and adds its authentication, field mapping, idempotency, and reconciliation rules.
 
-See the [Local Technical Verification Report](docs/local-technical-verification-report.md) for the exact verified code commit, date, environment scope, multiprocessing evidence, and exclusions. No client deployment or client acceptance is claimed.
+See the [Local Technical Verification Report](docs/local-technical-verification-report.md) for the verified release, date, environment scope, multiprocessing evidence, and exclusions. No client deployment or client acceptance is claimed.
 
 ## Project map
 
@@ -131,7 +138,7 @@ evaluations/         synthetic scoring regression cases
 data/                sample inputs; runtime CRM files are ignored
 docs/                case-study source and operating boundaries
 tools/               PDF builder and repository checks
-output/pdf/          final Upwork-ready portfolio documents
+output/pdf/          final portfolio documents
 .github/workflows/   multi-version CI and validated PDF rebuild
 ```
 

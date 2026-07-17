@@ -8,10 +8,11 @@ import html
 import json
 import logging
 import secrets
+import threading
 import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
 from config import Settings
@@ -21,6 +22,47 @@ from storage import DataStoreError, JsonCRM
 
 LOGGER = logging.getLogger(__name__)
 SOURCE_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-")
+
+
+class FixedWindowLimiter:
+    """Small, bounded, thread-safe limiter for the single-process local server."""
+
+    def __init__(
+        self,
+        window_seconds: int,
+        limit: int,
+        max_buckets: int,
+        *,
+        now: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.window_seconds = window_seconds
+        self.limit = limit
+        self.max_buckets = max_buckets
+        self._now = now
+        self._buckets: dict[str, tuple[int, float]] = {}
+        self._lock = threading.Lock()
+
+    def record(self, key: str) -> tuple[bool, int]:
+        current = float(self._now())
+        safe_key = key or "unknown"
+        with self._lock:
+            self._buckets = {
+                item_key: bucket
+                for item_key, bucket in self._buckets.items()
+                if current < bucket[1]
+            }
+            if safe_key not in self._buckets and len(self._buckets) >= self.max_buckets:
+                oldest = min(self._buckets, key=lambda item_key: self._buckets[item_key][1])
+                self._buckets.pop(oldest, None)
+            count, reset_at = self._buckets.get(safe_key, (0, current + self.window_seconds))
+            count += 1
+            self._buckets[safe_key] = (count, reset_at)
+            retry_after = max(1, int(reset_at - current + 0.999))
+            return count <= self.limit, retry_after
+
+    def size(self) -> int:
+        with self._lock:
+            return len(self._buckets)
 
 
 def validate_intake(payload: object, max_message_chars: int) -> tuple[str, str]:
@@ -41,24 +83,33 @@ def validate_intake(payload: object, max_message_chars: int) -> tuple[str, str]:
 def make_handler(store: JsonCRM, settings: Settings) -> type[BaseHTTPRequestHandler]:
     sessions: dict[str, dict[str, str | float]] = {}
     login_failures: dict[str, dict[str, float | int]] = {}
+    sessions_lock = threading.RLock()
+    login_failures_lock = threading.Lock()
+    intake_limiter = FixedWindowLimiter(
+        settings.intake_rate_limit_window_seconds,
+        settings.intake_rate_limit_max,
+        settings.intake_rate_limit_max_buckets,
+    )
+    provider_slots = threading.BoundedSemaphore(settings.openai_max_concurrency)
     local_csrf_token = secrets.token_urlsafe(32)
 
     def record_login_failure(client_key: str) -> tuple[bool, int]:
-        now = time.monotonic()
-        bucket = login_failures.get(client_key)
-        if not bucket or now >= float(bucket["reset_at"]):
-            bucket = {"count": 0, "reset_at": now + settings.login_failure_window_seconds}
-        bucket["count"] = int(bucket["count"]) + 1
-        login_failures[client_key] = bucket
-        if len(login_failures) > 64:
-            oldest = min(login_failures, key=lambda key: float(login_failures[key]["reset_at"]))
-            if oldest != client_key:
-                login_failures.pop(oldest, None)
-        retry_after = max(1, int(float(bucket["reset_at"]) - now + 0.999))
-        return int(bucket["count"]) <= settings.login_failure_max, retry_after
+        with login_failures_lock:
+            now = time.monotonic()
+            bucket = login_failures.get(client_key)
+            if not bucket or now >= float(bucket["reset_at"]):
+                bucket = {"count": 0, "reset_at": now + settings.login_failure_window_seconds}
+            bucket["count"] = int(bucket["count"]) + 1
+            login_failures[client_key] = bucket
+            if len(login_failures) > 64:
+                oldest = min(login_failures, key=lambda key: float(login_failures[key]["reset_at"]))
+                if oldest != client_key:
+                    login_failures.pop(oldest, None)
+            retry_after = max(1, int(float(bucket["reset_at"]) - now + 0.999))
+            return int(bucket["count"]) <= settings.login_failure_max, retry_after
 
     class CRMHandler(BaseHTTPRequestHandler):
-        server_version = "CRMApplication/2.0"
+        server_version = "CRMApplication/2.1"
         sys_version = ""
 
         def do_GET(self) -> None:  # noqa: N802
@@ -115,8 +166,28 @@ def make_handler(store: JsonCRM, settings: Settings) -> type[BaseHTTPRequestHand
                 if route == "/api/maintenance/purge":
                     self.send_json({"purged_ids": store.purge_expired()})
                     return
+                allowed, retry_after = intake_limiter.record(self.client_address[0])
+                if not allowed:
+                    self.send_json(
+                        {"error": "intake_rate_limited"},
+                        HTTPStatus.TOO_MANY_REQUESTS,
+                        {"Retry-After": str(retry_after)},
+                    )
+                    return
                 source, message = validate_intake(self.read_json(), settings.max_message_chars)
-                self.send_json({"lead": store.create_lead(source, message)}, HTTPStatus.CREATED)
+                if settings.use_openai and not provider_slots.acquire(blocking=False):
+                    self.send_json(
+                        {"error": "provider_concurrency_limited"},
+                        HTTPStatus.TOO_MANY_REQUESTS,
+                        {"Retry-After": "1"},
+                    )
+                    return
+                try:
+                    lead = store.create_lead(source, message)
+                finally:
+                    if settings.use_openai:
+                        provider_slots.release()
+                self.send_json({"lead": lead}, HTTPStatus.CREATED)
             except RequestError as error:
                 self.send_json({"error": error.code}, error.status)
             except ValueError as error:
@@ -164,15 +235,16 @@ def make_handler(store: JsonCRM, settings: Settings) -> type[BaseHTTPRequestHand
                 return "bearer", None
             cookie = self.headers.get("Cookie", "")
             session_token = self._session_token(cookie)
-            session = sessions.get(session_token)
-            now = time.monotonic()
-            if not session or now >= float(session["expires_at"]):
-                if session_token:
-                    sessions.pop(session_token, None)
-                return None, None
-            session["last_seen"] = now
-            session["expires_at"] = now + settings.session_ttl_seconds
-            return "session", str(session["csrf"])
+            with sessions_lock:
+                session = sessions.get(session_token)
+                now = time.monotonic()
+                if not session or now >= float(session["expires_at"]):
+                    if session_token:
+                        sessions.pop(session_token, None)
+                    return None, None
+                session["last_seen"] = now
+                session["expires_at"] = now + settings.session_ttl_seconds
+                return "session", str(session["csrf"])
 
         @staticmethod
         def _session_token(cookie: str) -> str:
@@ -217,18 +289,20 @@ def make_handler(store: JsonCRM, settings: Settings) -> type[BaseHTTPRequestHand
                     return
                 self._send(render_login("Invalid local access key."), "text/html; charset=utf-8", HTTPStatus.UNAUTHORIZED)
                 return
-            login_failures.pop(self.client_address[0], None)
+            with login_failures_lock:
+                login_failures.pop(self.client_address[0], None)
             session_token = secrets.token_urlsafe(32)
             csrf_token = secrets.token_urlsafe(32)
-            if len(sessions) >= 64:
-                sessions.pop(next(iter(sessions)))
             now = time.monotonic()
-            sessions[session_token] = {
-                "csrf": csrf_token,
-                "created_at": now,
-                "last_seen": now,
-                "expires_at": now + settings.session_ttl_seconds,
-            }
+            with sessions_lock:
+                if len(sessions) >= 64:
+                    sessions.pop(next(iter(sessions)))
+                sessions[session_token] = {
+                    "csrf": csrf_token,
+                    "created_at": now,
+                    "last_seen": now,
+                    "expires_at": now + settings.session_ttl_seconds,
+                }
             self.send_response(HTTPStatus.SEE_OTHER)
             self.send_header("Location", "/")
             self.send_header("Set-Cookie", f"crm_session={session_token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={settings.session_ttl_seconds}")
@@ -248,7 +322,8 @@ def make_handler(store: JsonCRM, settings: Settings) -> type[BaseHTTPRequestHand
             except RequestError as error:
                 self.send_json({"error": error.code}, error.status)
                 return
-            sessions.pop(self._session_token(self.headers.get("Cookie", "")), None)
+            with sessions_lock:
+                sessions.pop(self._session_token(self.headers.get("Cookie", "")), None)
             self.send_response(HTTPStatus.SEE_OTHER)
             self.send_header("Location", "/login")
             self.send_header("Set-Cookie", "crm_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")

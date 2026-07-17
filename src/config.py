@@ -45,6 +45,10 @@ class Settings:
     session_ttl_seconds: int = 3600
     login_failure_window_seconds: int = 60
     login_failure_max: int = 5
+    intake_rate_limit_window_seconds: int = 60
+    intake_rate_limit_max: int = 30
+    intake_rate_limit_max_buckets: int = 1024
+    openai_max_concurrency: int = 2
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -83,4 +87,8 @@ class Settings:
             session_ttl_seconds=_int("SESSION_TTL_SECONDS", 3600, 1, 86400),
             login_failure_window_seconds=_int("LOGIN_FAILURE_WINDOW_SECONDS", 60, 1, 3600),
             login_failure_max=_int("LOGIN_FAILURE_MAX", 5, 1, 100),
+            intake_rate_limit_window_seconds=_int("INTAKE_RATE_LIMIT_WINDOW_SECONDS", 60, 1, 3600),
+            intake_rate_limit_max=_int("INTAKE_RATE_LIMIT_MAX", 30, 1, 1000),
+            intake_rate_limit_max_buckets=_int("INTAKE_RATE_LIMIT_MAX_BUCKETS", 1024, 1, 10000),
+            openai_max_concurrency=_int("OPENAI_MAX_CONCURRENCY", 2, 1, 20),
         )

@@ -11,12 +11,13 @@ import purge_data
 
 class ConfigAndStartupTests(unittest.TestCase):
     def test_settings_from_env_accepts_documented_values(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ,{"HOST":"127.0.0.1","PORT":"8090","CRM_DATA_DIR":directory,"MAX_REQUEST_BYTES":"2048","MAX_MESSAGE_CHARS":"500","STORE_RAW_MESSAGE":"1","USE_OPENAI":"1","OPENAI_API_KEY":"secret","OPENAI_MODEL":"model-test","OPENAI_TIMEOUT_SECONDS":"15","LOCAL_API_KEY":"x"*32,"CONTACT_RETENTION_DAYS":"120","SESSION_TTL_SECONDS":"600","LOGIN_FAILURE_WINDOW_SECONDS":"30","LOGIN_FAILURE_MAX":"3"},clear=True): settings=Settings.from_env()
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ,{"HOST":"127.0.0.1","PORT":"8090","CRM_DATA_DIR":directory,"MAX_REQUEST_BYTES":"2048","MAX_MESSAGE_CHARS":"500","STORE_RAW_MESSAGE":"1","USE_OPENAI":"1","OPENAI_API_KEY":"secret","OPENAI_MODEL":"model-test","OPENAI_TIMEOUT_SECONDS":"15","OPENAI_MAX_CONCURRENCY":"3","LOCAL_API_KEY":"x"*32,"CONTACT_RETENTION_DAYS":"120","SESSION_TTL_SECONDS":"600","LOGIN_FAILURE_WINDOW_SECONDS":"30","LOGIN_FAILURE_MAX":"3","INTAKE_RATE_LIMIT_WINDOW_SECONDS":"45","INTAKE_RATE_LIMIT_MAX":"12","INTAKE_RATE_LIMIT_MAX_BUCKETS":"200"},clear=True): settings=Settings.from_env()
         self.assertEqual(settings.port,8090); self.assertEqual(settings.data_dir,Path(directory).resolve()); self.assertTrue(settings.store_raw_message); self.assertTrue(settings.use_openai)
         self.assertEqual(settings.contact_retention_days,120); self.assertEqual(settings.local_api_key,"x"*32)
         self.assertEqual(settings.session_ttl_seconds,600); self.assertEqual(settings.login_failure_max,3)
+        self.assertEqual(settings.intake_rate_limit_max,12); self.assertEqual(settings.openai_max_concurrency,3)
     def test_settings_reject_invalid_host_boolean_port_and_missing_key(self):
-        cases=[({"HOST":"0.0.0.0"},"loopback"),({"HOST":"localhost"},"numeric loopback"),({"PORT":"0"},"between"),({"USE_OPENAI":"maybe"},"must be 0 or 1"),({"USE_OPENAI":"1"},"OPENAI_API_KEY"),({"LOCAL_API_KEY":"short"},"32 characters"),({"CONTACT_RETENTION_DAYS":"0"},"between"),({"SESSION_TTL_SECONDS":"0"},"between"),({"LOGIN_FAILURE_MAX":"0"},"between")]
+        cases=[({"HOST":"0.0.0.0"},"loopback"),({"HOST":"localhost"},"numeric loopback"),({"PORT":"0"},"between"),({"USE_OPENAI":"maybe"},"must be 0 or 1"),({"USE_OPENAI":"1"},"OPENAI_API_KEY"),({"LOCAL_API_KEY":"short"},"32 characters"),({"CONTACT_RETENTION_DAYS":"0"},"between"),({"SESSION_TTL_SECONDS":"0"},"between"),({"LOGIN_FAILURE_MAX":"0"},"between"),({"INTAKE_RATE_LIMIT_MAX":"0"},"between"),({"INTAKE_RATE_LIMIT_MAX_BUCKETS":"0"},"between"),({"OPENAI_MAX_CONCURRENCY":"0"},"between")]
         for env,message in cases:
             with self.subTest(env=env),patch.dict(os.environ,env,clear=True):
                 with self.assertRaisesRegex(ValueError,message): Settings.from_env()

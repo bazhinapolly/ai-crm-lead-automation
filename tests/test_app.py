@@ -7,12 +7,13 @@ import tempfile
 import threading
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
 from tests import support  # noqa: F401
-from app import make_handler, render_lead_row, render_login, validate_intake
+from app import FixedWindowLimiter, make_handler, render_lead_row, render_login, validate_intake
 from config import Settings
 from openai_provider import OpenAIProviderError
 from storage import DataStoreError, JsonCRM
@@ -54,6 +55,95 @@ class AppTests(unittest.TestCase):
         status, _, data = self.request("POST", "/api/intake", body, {"Content-Type": "application/json"})
         self.assertEqual(status, 201)
         self.assertEqual(json.loads(data)["lead"]["source"], "website_form")
+
+    def test_intake_rate_limit_returns_retry_after(self) -> None:
+        server = ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            make_handler(
+                self.store,
+                Settings(
+                    data_dir=Path(self.temporary.name),
+                    intake_rate_limit_max=1,
+                    intake_rate_limit_window_seconds=30,
+                ),
+            ),
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        body = json.dumps({"source": "form", "message": "Need CRM"}).encode()
+
+        def limited_request():
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+            connection.request("POST", "/api/intake", body, {"Content-Type": "application/json"})
+            response = connection.getresponse()
+            result = response.status, dict(response.getheaders()), json.loads(response.read())
+            connection.close()
+            return result
+
+        try:
+            self.assertEqual(limited_request()[0], 201)
+            status, headers, response = limited_request()
+            self.assertEqual((status, response["error"]), (429, "intake_rate_limited"))
+            self.assertEqual(headers["Retry-After"], "30")
+        finally:
+            server.shutdown(); server.server_close(); thread.join()
+
+    def test_openai_concurrency_is_bounded_without_queueing_paid_work(self) -> None:
+        entered = threading.Event()
+        release = threading.Event()
+        original = self.store.create_lead
+
+        def blocking_create(source, message):
+            entered.set()
+            release.wait(3)
+            return original(source, message)
+
+        server = ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            make_handler(
+                self.store,
+                Settings(
+                    data_dir=Path(self.temporary.name),
+                    use_openai=True,
+                    openai_api_key="fixture-key",
+                    openai_max_concurrency=1,
+                ),
+            ),
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        payload = json.dumps({"source": "form", "message": "Need CRM"}).encode()
+
+        def provider_request():
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=4)
+            connection.request("POST", "/api/intake", payload, {"Content-Type": "application/json"})
+            response = connection.getresponse()
+            result = response.status, dict(response.getheaders()), json.loads(response.read())
+            connection.close()
+            return result
+
+        try:
+            with patch.object(self.store, "create_lead", side_effect=blocking_create):
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    first = pool.submit(provider_request)
+                    self.assertTrue(entered.wait(2))
+                    second = provider_request()
+                    self.assertEqual((second[0], second[2]["error"]), (429, "provider_concurrency_limited"))
+                    self.assertEqual(second[1]["Retry-After"], "1")
+                    release.set()
+                    self.assertEqual(first.result()[0], 201)
+        finally:
+            release.set(); server.shutdown(); server.server_close(); thread.join()
+
+    def test_fixed_window_limiter_is_thread_safe_and_memory_bounded(self) -> None:
+        now = 100.0
+        limiter = FixedWindowLimiter(10, 5, 2, now=lambda: now)
+        with ThreadPoolExecutor(max_workers=20) as pool:
+            results = list(pool.map(lambda _: limiter.record("shared")[0], range(20)))
+        self.assertEqual(sum(results), 5)
+        limiter.record("second")
+        limiter.record("third")
+        self.assertEqual(limiter.size(), 2)
 
     def test_wrong_content_type_is_rejected(self) -> None:
         status, _, body = self.request("POST", "/api/intake", b"{}", {"Content-Type": "text/plain"})
@@ -204,6 +294,53 @@ class AppTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join()
+
+    def test_concurrent_login_throttling_and_session_reads_are_consistent(self) -> None:
+        key = "s" * 32
+        server = ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            make_handler(
+                self.store,
+                Settings(data_dir=Path(self.temporary.name), local_api_key=key, login_failure_max=2),
+            ),
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+
+        def secured_request(method, path, body=None, headers=None):
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=4)
+            connection.request(method, path, body=body, headers=headers or {})
+            response = connection.getresponse()
+            result = response.status, dict(response.getheaders()), response.read()
+            connection.close()
+            return result
+
+        try:
+            wrong_headers = {"Content-Type": "application/x-www-form-urlencoded"}
+            with ThreadPoolExecutor(max_workers=10) as pool:
+                statuses = list(pool.map(
+                    lambda _: secured_request("POST", "/auth/login", b"api_key=wrong", wrong_headers)[0],
+                    range(10),
+                ))
+            self.assertEqual(statuses.count(401), 2)
+            self.assertEqual(statuses.count(429), 8)
+
+            status, headers, _ = secured_request(
+                "POST",
+                "/auth/login",
+                f"api_key={key}".encode(),
+                wrong_headers,
+            )
+            self.assertEqual(status, 303)
+            cookie = headers["Set-Cookie"].split(";", 1)[0]
+            with ThreadPoolExecutor(max_workers=12) as pool:
+                session_statuses = list(pool.map(
+                    lambda _: secured_request("GET", "/api/leads", headers={"Cookie": cookie})[0],
+                    range(12),
+                ))
+            self.assertEqual(session_statuses, [200] * 12)
+        finally:
+            server.shutdown(); server.server_close(); thread.join()
 
     def test_login_renderer_escapes_notice(self) -> None:
         self.assertNotIn("<script>", render_login("<script>"))
