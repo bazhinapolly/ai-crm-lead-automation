@@ -1,4 +1,4 @@
-"""Thread-safe transactional state storage for the local CRM application."""
+"""Thread- and process-safe transactional state for the local CRM application."""
 
 from __future__ import annotations
 

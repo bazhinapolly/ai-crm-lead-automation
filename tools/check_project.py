@@ -16,11 +16,12 @@ REQUIRED = [
     "tests/test_lead_ai.py", "tests/test_openai_provider.py", "tests/test_storage.py",
     "tests/test_config_and_startup.py", "config/scoring-policy.json",
     "evaluations/scoring-cases.json", "docs/privacy-and-operations.md",
-    "docs/scoring-evaluation.md", "tools/evaluate_scoring.py", "tools/build_portfolio_pdfs.py",
+    "docs/scoring-evaluation.md", "docs/local-technical-verification-report.md",
+    "tools/evaluate_scoring.py", "tools/build_portfolio_pdfs.py",
 ]
 PDFS = {
-    "AI-CRM-Lead-Automation-Case-Study.pdf": (2, ("AI CRM Lead Automation", "66", "Integration scope")),
-    "AI-CRM-Lead-Automation-Technical-Summary.pdf": (1, ("AI CRM Lead Automation", "Responses API", "Production rollout")),
+    "AI-CRM-Lead-Automation-Case-Study.pdf": (2, ("AI CRM Lead Automation", "69", "interprocess", "Integration scope")),
+    "AI-CRM-Lead-Automation-Technical-Summary.pdf": (1, ("AI CRM Lead Automation", "interprocess file lock", "f892334", "Production rollout")),
 }
 FORBIDDEN_PDF_WORDING = (
     r"\bdemo\b",
@@ -41,7 +42,7 @@ def check_structure() -> None:
     missing = [item for item in REQUIRED if not (ROOT / item).is_file()]
     if missing:
         fail(f"missing required files: {', '.join(missing)}")
-    forbidden = [path for path in ROOT.rglob("*") if path.name == ".DS_Store" or "docs - " in path.name]
+    forbidden = [path for path in ROOT.rglob("*") if path.name in {".DS_Store", "client-verification-report.md"} or "docs - " in path.name]
     if forbidden:
         fail(f"generated or duplicate files remain: {', '.join(str(path.relative_to(ROOT)) for path in forbidden[:5])}")
 

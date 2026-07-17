@@ -11,18 +11,19 @@ A portfolio-grade local application that turns inbound messages into structured 
 - Optional OpenAI Responses API mode with strict JSON Schema and `store: false`
 - Local contact extraction, duplicate detection, follow-up planning, and event logs
 - Date-accurate today/overdue metrics that exclude closed and duplicate-review records
-- Versioned single-file CRM state with transactional lead-and-event replacement
-- Optional local bearer/browser-session authentication with CSRF protection
+- Versioned single-file CRM state with interprocess locking and transactional lead-and-event replacement
+- Safe legacy migration that removes old PII files only after a validated successful commit
+- Optional local bearer/browser-session authentication with CSRF, sliding TTL, logout, and login throttling
 - Configurable contact retention plus export/delete-by-ID and explicit purge operations
 - Raw lead messages excluded from storage unless explicitly enabled
 - Best-effort PII redaction before OpenAI and local redaction of generated stored fields
 - HTML escaping, constrained CSS classes, security headers, and CSV formula neutralization
 - Responsive local dashboard, JSON endpoints, and CSV handoff
-- 66 isolated tests, 90% coverage enforcement, and CI on Python 3.11, 3.12, and 3.13
+- 69 isolated tests, 90% coverage enforcement, and CI on Python 3.11, 3.12, and 3.13
 
 ## Local quick start
 
-Requires Python 3.11 or newer. The application itself has no third-party runtime dependencies.
+Requires Python 3.11 or newer on macOS or Linux. The application itself has no third-party runtime dependencies; it uses the standard-library/OS `flock` interface for interprocess state protection.
 
 ```bash
 python3 src/seed_data.py --reset
@@ -83,13 +84,15 @@ CSV includes contact phone, owner, and suggested reply in addition to the scorin
 
 ## Local access and data lifecycle
 
-Loopback binding remains the default boundary. Set a random `LOCAL_API_KEY` (at least 32 characters) when another local process or user must not read CRM data. API clients use `Authorization: Bearer ...`; browser users are redirected to a local sign-in form that creates an HttpOnly, SameSite session. State-changing browser requests require a CSRF token. Authentication remains mandatory before adapting the application for any non-loopback or multiuser deployment.
+Loopback binding remains the default boundary. Set a random `LOCAL_API_KEY` (at least 32 characters) when another local process or user must not read CRM data. API clients use `Authorization: Bearer ...`; browser users are redirected to a local sign-in form that creates an HttpOnly, SameSite session. Sessions use a configurable sliding TTL, logout clears both server state and cookie, failed sign-ins are throttled, and state-changing browser requests require a CSRF token. Authentication remains mandatory before adapting the application for any non-loopback or multiuser deployment.
 
 Extracted contacts are retained locally until explicitly deleted or purged. `CONTACT_RETENTION_DAYS` defaults to 90 days. Run the following command to apply the policy; it records metadata-only purge events and does not include contact values in logs:
 
 ```bash
 python3 src/purge_data.py
 ```
+
+Every state transaction is protected across threads and independent processes. During a legacy upgrade, `leads.json` and `automation_logs.json` are deleted only after `crm_state.json` has been validated and atomically committed. Invalid or timezone-free `received_at` values stop startup/purge with a safe storage error instead of bypassing retention. Backup copies outside the CRM directory remain the operator's responsibility.
 
 ## Optional OpenAI mode
 
@@ -115,6 +118,8 @@ Weights, service bonuses, and Hot/Warm/Cold thresholds live in [`config/scoring-
 This local-first application intentionally binds to a single machine and now provides optional local authentication, browser sessions, CSRF controls, and explicit contact lifecycle operations. Production rollout still requires mandatory identity and authorization, tenant isolation, TLS, a managed database, automated retention, rate limiting, observability, backups, and the target CRM's official API. See [`docs/privacy-and-operations.md`](docs/privacy-and-operations.md).
 
 The architecture provides documented integration points for HubSpot, Airtable, Google Sheets, Gmail, Zapier, Make, and n8n connectors selected for a client environment.
+
+See the [Local Technical Verification Report](docs/local-technical-verification-report.md) for the exact verified code commit, date, environment scope, multiprocessing evidence, and exclusions. No client deployment or client acceptance is claimed.
 
 ## Project map
 

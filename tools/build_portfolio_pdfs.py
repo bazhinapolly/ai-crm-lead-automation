@@ -96,7 +96,7 @@ def invariant_canvas(*args, **kwargs):
 def summary_strip() -> Table:
     data = [
         [p("DELIVERY", "small"), p("ANALYSIS", "small"), p("QUALITY", "small"), p("DEPLOYMENT", "small")],
-        [p("Local dashboard + API", "h3"), p("Offline or optional OpenAI", "h3"), p("66 automated tests", "h3"), p("Local-first application", "h3")],
+        [p("Local dashboard + API", "h3"), p("Offline or optional OpenAI", "h3"), p("69 automated tests", "h3"), p("Local-first application", "h3")],
     ]
     table = Table(data, colWidths=[1.68 * inch] * 4, rowHeights=[0.22 * inch, 0.42 * inch])
     table.setStyle(TableStyle([
@@ -155,7 +155,7 @@ def build_case_study() -> None:
         Table(
             [
                 [p("Reliable persistence", "h3"), p("Safer interfaces", "h3")],
-                [[bullet("Transactional lead + event state"), bullet("Atomic tempfile + replace commit"), bullet("Schema-version and corruption checks"), bullet("Legacy JSON migration")], [bullet("Generic server errors"), bullet("HTML escaping and allowlisted classes"), bullet("Formula-safe CSV cells"), bullet("No-cache and browser security headers")]],
+                [[bullet("Transactional lead + event state"), bullet("OS-level interprocess file lock"), bullet("Atomic tempfile + replace commit"), bullet("Validated migration removes legacy PII files")], [bullet("Generic server errors"), bullet("HTML escaping and allowlisted classes"), bullet("Formula-safe CSV cells"), bullet("No-cache and browser security headers")]],
             ],
             colWidths=[3.35 * inch, 3.35 * inch],
             style=TableStyle([("BACKGROUND", (0, 0), (-1, -1), PALE), ("BOX", (0, 0), (-1, -1), 0.7, LINE), ("INNERGRID", (0, 0), (-1, -1), 0.5, LINE), ("VALIGN", (0, 0), (-1, -1), "TOP"), ("PADDING", (0, 0), (-1, -1), 9)]),
@@ -164,19 +164,20 @@ def build_case_study() -> None:
         bullet("Raw inquiry text is not retained unless STORE_RAW_MESSAGE=1 is deliberately enabled."),
         bullet("API keys, provider bodies, and lead text are excluded from logs."),
         bullet("Detected contact fields are best-effort redacted before OpenAI; pattern-based anonymization is not guaranteed."),
-        bullet("Optional bearer/session access, browser CSRF protection, per-lead deletion, and a 90-day purge policy are implemented."),
+        bullet("Optional bearer/session access includes TTL, logout, login throttling, CSRF, deletion, and a 90-day purge policy."),
         bullet("Responses application-state storage is disabled with store: false."),
         p("Verification evidence", "h2"),
         Table(
-            [[p("66", "number"), p("isolated tests", "h3"), p("3", "number"), p("Python versions in CI", "h3"), p("90", "number"), p("coverage gate (%)", "h3")],
-             ["", p("Analysis, extraction, provider, lifecycle, auth, CSRF, CSV, HTML, and local HTTP behavior.", "small"), "", p("Python 3.11, 3.12, and 3.13 run the same standard-library suite.", "small"), "", p("Overall coverage is enforced; app and provider paths exceed 85%.", "small")]],
+            [[p("69", "number"), p("isolated tests", "h3"), p("6", "number"), p("simultaneous processes", "h3"), p("91", "number"), p("overall coverage (%)", "h3")],
+             ["", p("Analysis, provider, lifecycle, auth, CSRF, migration, CSV, HTML, and HTTP behavior.", "small"), "", p("Mandatory regression preserves all six leads and events in one shared state.", "small"), "", p("CI gate is 90%; storage is 91%, app 87%, and provider 97%.", "small")]],
             colWidths=[0.45 * inch, 1.78 * inch] * 3,
             style=TableStyle([("BACKGROUND", (0, 0), (-1, -1), PALE_BLUE), ("BOX", (0, 0), (-1, -1), 0.7, LINE), ("VALIGN", (0, 0), (-1, -1), "TOP"), ("PADDING", (0, 0), (-1, -1), 7)]),
         ),
         p("Client adaptation path", "h2"),
         p("After requirements discovery, the same validated record can be connected to an authenticated form or inbox and written through an official CRM API. Production delivery makes authentication mandatory and adds authorization, TLS, rate limits, a managed transactional database, scheduled lifecycle automation, monitoring, backups, and reconciliation."),
         p("Integration scope", "h2"),
-        p("The architecture provides documented integration points for Gmail, HubSpot, Airtable, Google Sheets, Pipedrive, GoHighLevel, Zapier, Make, and n8n. Connector selection, credentials, and data mapping are configured for each client environment. OpenAI connectivity is enabled with the project owner's API key; all provider-independent behavior is locally and continuously verified."),
+        p("The architecture provides documented integration points for Gmail, HubSpot, Airtable, Google Sheets, Pipedrive, GoHighLevel, Zapier, Make, and n8n. Connector selection, credentials, and data mapping are configured for each client environment. No client deployment, client acceptance, live model-quality score, or measured business outcome is claimed."),
+        p("Verified locally 2026-07-17 | code commit f892334ccf7aebc5eb840ea4b4675f1d55866a72 | github.com/bazhinapolly/ai-crm-lead-automation", "small"),
     ]
     doc(path, "AI CRM Lead Automation - Case Study").build(story, onFirstPage=page_frame, onLaterPages=page_frame, canvasmaker=invariant_canvas)
 
@@ -200,7 +201,7 @@ def build_technical_summary() -> None:
         p("Architecture", "h2"),
         Table(
             [[p("INTAKE", "table_head"), p("ANALYSIS", "table_head"), p("PERSISTENCE", "table_head"), p("DELIVERY", "table_head")],
-            [p("Threaded local HTTP server, strict JSON media type, request/message bounds, bearer/session access, CSRF.", "table"), p("Versioned scoring policy or best-effort redacted Structured Outputs; local validation always enforced.", "table"), p("Process lock, duplicate check, transactional state, retention, export/delete, raw message opt-in.", "table"), p("Escaped dashboard, JSON endpoints, date-accurate metrics, event log, formula-safe CSV.", "table")]],
+            [p("Threaded local HTTP server, strict JSON media type, request/message bounds, bearer/session access, CSRF.", "table"), p("Versioned scoring policy or best-effort redacted Structured Outputs; local validation always enforced.", "table"), p("OS interprocess file lock, atomic state, validated legacy cleanup, retention, export/delete.", "table"), p("Escaped dashboard, JSON endpoints, date-accurate metrics, event log, formula-safe CSV.", "table")]],
             colWidths=[1.675 * inch] * 4,
             style=TableStyle([("BACKGROUND", (0, 0), (-1, 0), NAVY), ("BACKGROUND", (0, 1), (-1, 1), PALE), ("BOX", (0, 0), (-1, -1), 0.7, LINE), ("INNERGRID", (0, 0), (-1, -1), 0.5, LINE), ("VALIGN", (0, 0), (-1, -1), "TOP"), ("PADDING", (0, 0), (-1, -1), 7)]),
         ),
@@ -208,16 +209,16 @@ def build_technical_summary() -> None:
         Table(endpoints, colWidths=[0.95 * inch, 1.95 * inch, 3.8 * inch], repeatRows=1, style=TableStyle([("BACKGROUND", (0, 0), (-1, 0), TEAL), ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, PALE]), ("BOX", (0, 0), (-1, -1), 0.7, LINE), ("INNERGRID", (0, 0), (-1, -1), 0.4, LINE), ("VALIGN", (0, 0), (-1, -1), "TOP"), ("PADDING", (0, 0), (-1, -1), 6)])),
         p("Security and privacy controls", "h2"),
         Table(
-            [[[bullet("Loopback-only host validation"), bullet("Optional strong local bearer/session key"), bullet("Browser CSRF protection"), bullet("Security and no-cache headers")], [bullet("CSV formula neutralization"), bullet("No secrets or lead text in logs"), bullet("Raw inquiry retention off by default"), bullet("90-day purge plus export/delete by ID")]]],
+            [[[bullet("Loopback-only host validation"), bullet("TTL sessions, logout, login throttling"), bullet("Browser CSRF protection"), bullet("Security and no-cache headers")], [bullet("CSV formula neutralization"), bullet("Legacy PII files removed after migration"), bullet("Invalid timestamps fail safely"), bullet("90-day purge plus export/delete by ID")]]],
             colWidths=[3.35 * inch, 3.35 * inch],
             style=TableStyle([("BACKGROUND", (0, 0), (-1, -1), PALE_BLUE), ("BOX", (0, 0), (-1, -1), 0.7, LINE), ("VALIGN", (0, 0), (-1, -1), "TOP"), ("PADDING", (0, 0), (-1, -1), 7)]),
         ),
         p("Verification", "h2"),
-        p("66 isolated tests cover configuration, safe seed behavior, scoring-policy schema, conservative extraction, strict completed provider output, retries, transactional storage, lifecycle, authentication, CSRF, CSV and HTML safety, and local HTTP behavior. CI enforces 90% overall coverage on Python 3.11-3.13, verifies scoring, and rebuilds both PDFs."),
+        p("69 isolated tests cover configuration, scoring, provider output, retries, interprocess storage, atomic migration, legacy cleanup, retention invariants, session TTL/logout/throttling, CSRF, CSV/HTML safety, and local HTTP behavior. Six-process regression evidence and 91% overall coverage run in CI on Python 3.11-3.13."),
         p("Run locally", "h2"),
         Table([[p("python3 -m unittest discover -s tests -v", "code"), p("python3 src/seed_data.py --reset", "code"), p("python3 src/app.py", "code")]], colWidths=[2.6 * inch, 2.05 * inch, 2.05 * inch], style=TableStyle([("BACKGROUND", (0, 0), (-1, -1), NAVY), ("BOX", (0, 0), (-1, -1), 0.7, NAVY), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("PADDING", (0, 0), (-1, -1), 7)])),
         Spacer(1, 0.04 * inch),
-        p("Production rollout makes identity and authorization mandatory and adds TLS, rate limits, managed persistence, monitoring, backups, and scheduled lifecycle controls.", "small"),
+        p("Verified locally 2026-07-17 | code commit f892334ccf7aebc5eb840ea4b4675f1d55866a72 | github.com/bazhinapolly/ai-crm-lead-automation<br/>No client deployment or measured business outcome claimed. Production rollout requires mandatory identity/authorization, TLS, managed persistence, monitoring, backups, and scheduled lifecycle controls.", "small"),
     ]
     doc(path, "AI CRM Lead Automation - Technical Summary").build(story, onFirstPage=page_frame, onLaterPages=page_frame, canvasmaker=invariant_canvas)
 
