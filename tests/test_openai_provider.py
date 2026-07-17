@@ -39,6 +39,10 @@ class OpenAIProviderTests(unittest.TestCase):
     def setUp(self) -> None:
         self.provider = OpenAIProvider("secret", "model-test", max_attempts=2)
 
+    def test_api_key_is_required(self) -> None:
+        with self.assertRaisesRegex(ValueError, "API key"):
+            OpenAIProvider("", "model")
+
     def test_payload_disables_storage_and_uses_strict_schema(self) -> None:
         payload = self.provider._payload("message")
         self.assertIs(payload["store"], False)
@@ -58,11 +62,42 @@ class OpenAIProviderTests(unittest.TestCase):
 
     def test_refusal_is_safe_failure(self) -> None:
         with self.assertRaisesRegex(OpenAIProviderError, "refused"):
-            self.provider._extract_output({"output": [{"content": [{"type": "refusal"}]}]})
+            self.provider._extract_output({"status": "completed", "output": [{"content": [{"type": "refusal"}]}]})
 
     def test_incomplete_result_is_safe_failure(self) -> None:
         with self.assertRaisesRegex(OpenAIProviderError, "complete"):
             self.provider._extract_output({"status": "incomplete"})
+
+    def test_only_completed_error_free_results_are_accepted(self) -> None:
+        output = [{"content": [{"type": "output_text", "text": json.dumps(VALID)}]}]
+        for result in (
+            {"output": output},
+            {"status": "failed", "output": output},
+            {"status": "cancelled", "output": output},
+            {"status": "completed", "error": {"code": "provider_error"}, "output": output},
+        ):
+            with self.subTest(result=result), self.assertRaisesRegex(OpenAIProviderError, "complete"):
+                self.provider._extract_output(result)
+
+    def test_malformed_completed_outputs_are_rejected(self) -> None:
+        cases = (
+            {"status": "completed"},
+            {"status": "completed", "output": [None, {"content": None}]},
+            {"status": "completed", "output": [{"content": [None]}]},
+            {"status": "completed", "output": [{"content": [{"type": "output_text", "text": "not-json"}]}]},
+        )
+        for result in cases:
+            with self.subTest(result=result), self.assertRaises(OpenAIProviderError):
+                self.provider._extract_output(result)
+
+    @patch("openai_provider.time.sleep")
+    @patch("openai_provider.urllib.request.urlopen")
+    def test_transport_failure_exhausts_retries(self, urlopen: MagicMock, sleep: MagicMock) -> None:
+        urlopen.side_effect = urllib.error.URLError("offline")
+        with self.assertRaisesRegex(OpenAIProviderError, "temporarily unavailable"):
+            self.provider.analyze("lead")
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once()
 
     @patch("openai_provider.time.sleep")
     @patch("openai_provider.urllib.request.urlopen")

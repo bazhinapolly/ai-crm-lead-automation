@@ -19,7 +19,7 @@ REQUIRED = [
     "docs/scoring-evaluation.md", "tools/evaluate_scoring.py", "tools/build_portfolio_pdfs.py",
 ]
 PDFS = {
-    "AI-CRM-Lead-Automation-Case-Study.pdf": (2, ("AI CRM Lead Automation", "50", "Integration scope")),
+    "AI-CRM-Lead-Automation-Case-Study.pdf": (2, ("AI CRM Lead Automation", "66", "Integration scope")),
     "AI-CRM-Lead-Automation-Technical-Summary.pdf": (1, ("AI CRM Lead Automation", "Responses API", "Production rollout")),
 }
 FORBIDDEN_PDF_WORDING = (

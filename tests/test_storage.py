@@ -51,11 +51,45 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(metrics["hot_leads"], 1)
         self.assertEqual(metrics["average_score"], 100)
 
+    def test_follow_up_metrics_use_dates_and_exclude_closed_or_duplicate_records(self) -> None:
+        today = dt.date(2026, 7, 10)
+        state = json.loads(self.store.state_file.read_text())
+        state["leads"] = [
+            {"id": "today", "follow_up_date": "2026-07-10", "status": "New"},
+            {"id": "late", "follow_up_date": "2026-07-09", "status": "Qualified"},
+            {"id": "closed", "follow_up_date": "2026-07-09", "status": "Closed Won"},
+            {"id": "duplicate", "follow_up_date": "2026-07-09", "status": "Duplicate Review"},
+            {"id": "future", "follow_up_date": "2026-07-11", "status": "New"},
+        ]
+        self.store._atomic_write_state(state)
+        metrics = self.store.pipeline_metrics(today)
+        self.assertEqual(metrics["follow_up_today"], 1)
+        self.assertEqual(metrics["overdue"], 1)
+
     def test_csv_export_neutralizes_formulas(self) -> None:
         lead = self.store.create_lead("form", "This is =HYPERLINK from Safe Co. Need CRM", NOW)
         state = json.loads(self.store.state_file.read_text()); state["leads"][0]["name"] = " =2+3"; self.store._atomic_write_state(state)
         rows = list(csv.DictReader(StringIO(self.store.export_leads_csv())))
         self.assertEqual(rows[0]["name"], "' =2+3")
+        self.assertIn("phone", rows[0])
+        self.assertIn("owner", rows[0])
+        self.assertIn("suggested_reply", rows[0])
+
+    def test_export_delete_and_retention_purge_manage_contact_lifecycle(self) -> None:
+        old = self.store.create_lead("form", "This is Alice. Need CRM. Email alice@example.com", NOW)
+        recent_time = NOW + dt.timedelta(days=100)
+        recent = self.store.create_lead("form", "This is Bob. Need reports. Email bob@example.com", recent_time)
+        self.assertEqual(self.store.export_lead(old["id"])["email"], "alice@example.com")
+        self.assertIsNone(self.store.export_lead("missing"))
+
+        removed = self.store.purge_expired(NOW + dt.timedelta(days=91))
+        self.assertEqual(removed, [old["id"]])
+        self.assertIsNone(self.store.export_lead(old["id"]))
+        self.assertTrue(self.store.delete_lead(recent["id"], recent_time))
+        self.assertFalse(self.store.delete_lead("missing", recent_time))
+        messages = [item["message"] for item in self.store.list_logs() if item["event_type"] in {"lead_purged", "lead_deleted"}]
+        self.assertTrue(messages)
+        self.assertFalse(any("alice@" in message or "bob@" in message for message in messages))
 
     def test_corrupt_json_raises_safe_storage_error(self) -> None:
         self.store.state_file.write_text("not-json", encoding="utf-8")

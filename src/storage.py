@@ -28,6 +28,7 @@ class JsonCRM:
         *,
         provider: AnalysisProvider | None = None,
         store_raw_message: bool = False,
+        retention_days: int = 90,
     ) -> None:
         self.data_dir = Path(data_dir)
         self.state_file = self.data_dir / "crm_state.json"
@@ -35,6 +36,7 @@ class JsonCRM:
         self.legacy_logs_file = self.data_dir / "automation_logs.json"
         self.provider = provider
         self.store_raw_message = store_raw_message
+        self.retention_days = retention_days
         self._lock = threading.RLock()
         self._ensure_files()
 
@@ -145,24 +147,79 @@ class JsonCRM:
             "message": message,
         }
 
-    def pipeline_metrics(self) -> dict[str, int | float]:
+    def pipeline_metrics(self, today: dt.date | None = None) -> dict[str, int | float]:
         leads = self.list_leads()
+        today = today or dt.datetime.now(dt.timezone.utc).date()
         count = lambda label: sum(item.get("priority_label") == label for item in leads)
         scores = [item.get("priority_score") for item in leads if isinstance(item.get("priority_score"), int)]
+        active_due_dates = []
+        for item in leads:
+            status = str(item.get("status", "")).casefold()
+            if status == "duplicate review" or status.startswith("closed"):
+                continue
+            try:
+                active_due_dates.append(dt.date.fromisoformat(str(item.get("follow_up_date", ""))))
+            except ValueError:
+                continue
         return {
             "total_leads": len(leads),
             "hot_leads": count("Hot"),
             "warm_leads": count("Warm"),
             "cold_leads": count("Cold"),
-            "follow_up_today": sum(item.get("pipeline_stage") == "Contact Today" for item in leads),
+            "follow_up_today": sum(due == today for due in active_due_dates),
+            "overdue": sum(due < today for due in active_due_dates),
             "average_score": round(sum(scores) / len(scores), 1) if scores else 0,
         }
 
+    def export_lead(self, lead_id: str) -> dict[str, object] | None:
+        with self._lock:
+            lead = next((item for item in self._load_state()["leads"] if item.get("id") == lead_id), None)
+            return dict(lead) if lead else None
+
+    def delete_lead(self, lead_id: str, now: dt.datetime | None = None) -> bool:
+        now = now or dt.datetime.now(dt.timezone.utc)
+        with self._lock:
+            state = self._load_state()
+            original = len(state["leads"])
+            state["leads"] = [item for item in state["leads"] if item.get("id") != lead_id]
+            if len(state["leads"]) == original:
+                return False
+            state["logs"].append(self._event("lead_deleted", lead_id, "Lead deleted by operator", now))
+            self._atomic_write_state(state)
+            return True
+
+    def purge_expired(self, now: dt.datetime | None = None) -> list[str]:
+        now = now or dt.datetime.now(dt.timezone.utc)
+        cutoff = now - dt.timedelta(days=self.retention_days)
+        with self._lock:
+            state = self._load_state()
+            retained = []
+            removed_ids = []
+            for lead in state["leads"]:
+                try:
+                    received_at = dt.datetime.fromisoformat(str(lead.get("received_at", "")))
+                    if received_at.tzinfo is None:
+                        received_at = received_at.replace(tzinfo=dt.timezone.utc)
+                except ValueError:
+                    retained.append(lead)
+                    continue
+                if received_at < cutoff:
+                    removed_ids.append(str(lead.get("id", "")))
+                else:
+                    retained.append(lead)
+            if not removed_ids:
+                return []
+            state["leads"] = retained
+            for lead_id in removed_ids:
+                state["logs"].append(self._event("lead_purged", lead_id, "Lead removed by retention policy", now))
+            self._atomic_write_state(state)
+            return removed_ids
+
     def export_leads_csv(self) -> str:
         fields = [
-            "id", "received_at", "source", "name", "email", "company", "service_needed",
+            "id", "received_at", "source", "name", "email", "phone", "company", "owner", "service_needed",
             "priority_label", "priority_score", "pipeline_stage", "follow_up_date", "status",
-            "next_action", "ai_summary", "analysis_mode",
+            "next_action", "suggested_reply", "ai_summary", "analysis_mode",
         ]
         output = StringIO(newline="")
         writer = csv.DictWriter(output, fieldnames=fields, lineterminator="\r\n")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import argparse
 
 from app import build_store
 from config import ROOT_DIR, Settings
@@ -20,11 +21,17 @@ def load_samples(path) -> list[dict[str, str]]:
     return samples
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Seed the local CRM with synthetic portfolio records.")
+    parser.add_argument("--reset", action="store_true", help="destructively clear existing leads and logs before seeding")
+    args = parser.parse_args(argv)
     settings = Settings.from_env()
     samples = load_samples(ROOT_DIR / "data" / "sample_messages.json")
     store = build_store(settings)
-    store.reset()
+    if store.list_leads() or store.list_logs():
+        if not args.reset:
+            raise SystemExit("CRM state is not empty. Re-run with --reset only if destructive replacement is intended.")
+        store.reset()
     for sample in samples:
         store.create_lead(sample["source"], sample["message"])
     print(f"Seeded {len(samples)} sample leads in {settings.data_dir}.")

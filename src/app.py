@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import errno
+import hmac
 import html
 import json
 import logging
+import secrets
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from config import Settings
 from openai_provider import OpenAIProvider, OpenAIProviderError
@@ -36,19 +38,33 @@ def validate_intake(payload: object, max_message_chars: int) -> tuple[str, str]:
 
 
 def make_handler(store: JsonCRM, settings: Settings) -> type[BaseHTTPRequestHandler]:
+    sessions: dict[str, str] = {}
+    local_csrf_token = secrets.token_urlsafe(32)
+
     class CRMHandler(BaseHTTPRequestHandler):
-        server_version = "CRMReference/1.0"
+        server_version = "CRMApplication/2.0"
         sys_version = ""
 
         def do_GET(self) -> None:  # noqa: N802
             route = urlparse(self.path).path
             try:
-                if route == "/":
-                    self._send(render_dashboard(store), "text/html; charset=utf-8")
-                elif route == "/api/health":
+                if route == "/api/health":
                     self.send_json({"ok": True, "service": "ai-crm-lead-automation", "mode": "openai" if settings.use_openai else "deterministic"})
+                    return
+                if route == "/login":
+                    self._send(render_login(), "text/html; charset=utf-8")
+                    return
+                auth_mode, csrf_token = self._authentication()
+                if auth_mode is None:
+                    self._authentication_required(route)
+                    return
+                if route == "/":
+                    self._send(render_dashboard(store, csrf_token or local_csrf_token), "text/html; charset=utf-8")
                 elif route == "/api/leads":
                     self.send_json({"leads": store.list_leads(), "metrics": store.pipeline_metrics()})
+                elif route.startswith("/api/leads/"):
+                    lead = store.export_lead(route.removeprefix("/api/leads/"))
+                    self.send_json({"lead": lead} if lead else {"error": "not_found"}, HTTPStatus.OK if lead else HTTPStatus.NOT_FOUND)
                 elif route == "/api/logs":
                     self.send_json({"logs": store.list_logs()})
                 elif route == "/export/leads.csv":
@@ -64,10 +80,22 @@ def make_handler(store: JsonCRM, settings: Settings) -> type[BaseHTTPRequestHand
                 self.send_json({"error": "storage_unavailable"}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
         def do_POST(self) -> None:  # noqa: N802
-            if urlparse(self.path).path != "/api/intake":
+            route = urlparse(self.path).path
+            if route == "/auth/login":
+                self._login()
+                return
+            if route not in {"/api/intake", "/api/maintenance/purge"}:
                 self.send_json({"error": "not_found"}, HTTPStatus.NOT_FOUND)
                 return
             try:
+                auth_mode, csrf_token = self._authentication()
+                if auth_mode is None:
+                    self.send_json({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED, {"WWW-Authenticate": "Bearer"})
+                    return
+                self._require_csrf(auth_mode, csrf_token)
+                if route == "/api/maintenance/purge":
+                    self.send_json({"purged_ids": store.purge_expired()})
+                    return
                 source, message = validate_intake(self.read_json(), settings.max_message_chars)
                 self.send_json({"lead": store.create_lead(source, message)}, HTTPStatus.CREATED)
             except RequestError as error:
@@ -83,13 +111,89 @@ def make_handler(store: JsonCRM, settings: Settings) -> type[BaseHTTPRequestHand
                 LOGGER.exception("Unexpected intake failure")
                 self.send_json({"error": "server_error"}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
+        def do_DELETE(self) -> None:  # noqa: N802
+            route = urlparse(self.path).path
+            if not route.startswith("/api/leads/"):
+                self.send_json({"error": "method_not_allowed"}, HTTPStatus.METHOD_NOT_ALLOWED, {"Allow": "GET, POST"})
+                return
+            auth_mode, csrf_token = self._authentication()
+            if auth_mode is None:
+                self.send_json({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED, {"WWW-Authenticate": "Bearer"})
+                return
+            try:
+                self._require_csrf(auth_mode, csrf_token)
+                deleted = store.delete_lead(route.removeprefix("/api/leads/"))
+                self.send_json({"deleted": True} if deleted else {"error": "not_found"}, HTTPStatus.OK if deleted else HTTPStatus.NOT_FOUND)
+            except RequestError as error:
+                self.send_json({"error": error.code}, error.status)
+            except DataStoreError:
+                LOGGER.exception("CRM data could not be written")
+                self.send_json({"error": "storage_unavailable"}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
         def do_OPTIONS(self) -> None:  # noqa: N802
             self.send_json({"error": "method_not_allowed"}, HTTPStatus.METHOD_NOT_ALLOWED, {"Allow": "GET, POST"})
 
         do_PUT = do_OPTIONS
         do_PATCH = do_OPTIONS
-        do_DELETE = do_OPTIONS
         do_HEAD = do_OPTIONS
+
+        def _authentication(self) -> tuple[str | None, str | None]:
+            if not settings.local_api_key:
+                return "local", local_csrf_token
+            authorization = self.headers.get("Authorization", "")
+            if authorization.startswith("Bearer ") and hmac.compare_digest(authorization[7:], settings.local_api_key):
+                return "bearer", None
+            cookie = self.headers.get("Cookie", "")
+            session_token = next(
+                (part.split("=", 1)[1] for part in cookie.split(";") if part.strip().startswith("crm_session=")),
+                "",
+            )
+            csrf_token = sessions.get(session_token)
+            return ("session", csrf_token) if csrf_token else (None, None)
+
+        def _authentication_required(self, route: str) -> None:
+            if route == "/":
+                self.send_response(HTTPStatus.SEE_OTHER)
+                self.send_header("Location", "/login")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
+            self.send_json({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED, {"WWW-Authenticate": "Bearer"})
+
+        def _login(self) -> None:
+            if not settings.local_api_key:
+                self.send_json({"error": "not_found"}, HTTPStatus.NOT_FOUND)
+                return
+            raw_length = self.headers.get("Content-Length", "")
+            try:
+                length = int(raw_length)
+            except ValueError:
+                self.send_json({"error": "invalid_request"}, HTTPStatus.BAD_REQUEST)
+                return
+            if not 0 <= length <= 4096:
+                self.send_json({"error": "request_too_large"}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+                return
+            payload = parse_qs(self.rfile.read(length).decode("utf-8", errors="replace"))
+            supplied = payload.get("api_key", [""])[0]
+            if not hmac.compare_digest(supplied, settings.local_api_key):
+                self._send(render_login("Invalid local access key."), "text/html; charset=utf-8", HTTPStatus.UNAUTHORIZED)
+                return
+            session_token = secrets.token_urlsafe(32)
+            csrf_token = secrets.token_urlsafe(32)
+            if len(sessions) >= 64:
+                sessions.pop(next(iter(sessions)))
+            sessions[session_token] = csrf_token
+            self.send_response(HTTPStatus.SEE_OTHER)
+            self.send_header("Location", "/")
+            self.send_header("Set-Cookie", f"crm_session={session_token}; HttpOnly; SameSite=Strict; Path=/")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+
+        def _require_csrf(self, auth_mode: str, csrf_token: str | None) -> None:
+            browser_request = bool(self.headers.get("Origin") or self.headers.get("Sec-Fetch-Site"))
+            required = auth_mode == "session" or (auth_mode == "local" and browser_request)
+            if required and not csrf_token_matches(self.headers.get("X-CSRF-Token", ""), csrf_token):
+                raise RequestError("csrf_failed", HTTPStatus.FORBIDDEN)
 
         def read_json(self) -> object:
             media_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
@@ -153,7 +257,16 @@ class RequestError(Exception):
         self.status = status
 
 
-def render_dashboard(store: JsonCRM) -> str:
+def csrf_token_matches(supplied: str, expected: str | None) -> bool:
+    return bool(expected) and hmac.compare_digest(supplied, expected)
+
+
+def render_login(message: str = "") -> str:
+    notice = f"<p>{html.escape(message)}</p>" if message else ""
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CRM sign in</title></head><body><main><h1>Local CRM access</h1>{notice}<form method="post" action="/auth/login"><label for="api_key">Local access key</label><input id="api_key" name="api_key" type="password" required autocomplete="current-password"><button type="submit">Sign in</button></form></main></body></html>"""
+
+
+def render_dashboard(store: JsonCRM, csrf_token: str = "") -> str:
     metrics = store.pipeline_metrics()
     rows = "".join(render_lead_row(lead) for lead in store.list_leads()) or '<tr><td colspan="6" class="empty">No leads yet. Submit the sample to begin.</td></tr>'
     return f"""<!doctype html>
@@ -163,14 +276,14 @@ def render_dashboard(store: JsonCRM) -> str:
 *{{box-sizing:border-box}}body{{margin:0;background:linear-gradient(145deg,#f6fbfa,#edf3f9);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,sans-serif}}
 header,main{{width:min(1180px,92vw);margin:auto}}header{{padding:54px 0 22px}}.eyebrow{{color:var(--accent);font-weight:800;letter-spacing:.13em;text-transform:uppercase;font-size:12px}}
 h1{{font-size:clamp(38px,6vw,70px);line-height:.98;letter-spacing:-.05em;margin:10px 0 16px;max-width:850px}}.intro{{max-width:760px;color:var(--muted);line-height:1.7;font-size:17px}}
-.metrics{{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin:24px 0}}.card,.panel{{background:rgba(255,255,255,.9);border:1px solid var(--line);border-radius:20px;box-shadow:0 16px 45px rgba(30,53,80,.08)}}
+.metrics{{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin:24px 0}}.card,.panel{{background:rgba(255,255,255,.9);border:1px solid var(--line);border-radius:20px;box-shadow:0 16px 45px rgba(30,53,80,.08)}}
 .card{{padding:18px}}.card strong{{font-size:30px;display:block}}.card span{{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}}.layout{{display:grid;grid-template-columns:1.3fr .7fr;gap:16px;padding-bottom:50px}}.panel{{padding:22px;overflow:hidden}}h2{{margin:0 0 14px}}table{{width:100%;border-collapse:collapse;font-size:13px}}th,td{{padding:11px 9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}}th{{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}}
 .badge{{display:inline-block;color:#fff;border-radius:999px;padding:5px 9px;font-weight:800}}.Hot{{background:var(--hot)}}.Warm{{background:var(--warm)}}.Cold{{background:var(--cold)}}.muted,.empty{{color:var(--muted)}}label{{display:block;font-size:12px;font-weight:800;color:var(--muted);margin:12px 0 6px}}input,textarea{{width:100%;font:inherit;padding:12px;border:1px solid var(--line);border-radius:12px}}textarea{{min-height:170px;resize:vertical}}button,.button{{display:inline-block;margin-top:12px;border:0;border-radius:12px;padding:12px 15px;background:var(--accent);color:#fff;text-decoration:none;font-weight:800;cursor:pointer}}.button{{background:var(--navy)}}#result{{min-height:24px}}@media(max-width:900px){{.metrics,.layout{{grid-template-columns:1fr 1fr}}.pipeline{{grid-column:1/-1}}.scroll{{overflow:auto}}table{{min-width:760px}}}}@media(max-width:560px){{.metrics,.layout{{grid-template-columns:1fr}}}}
 </style></head><body><header><div class="eyebrow">Local CRM application</div><h1>Turn inbound messages into an actionable CRM queue.</h1><p class="intro">Structured intake, deterministic or optional AI analysis, duplicate detection, safe local storage, follow-up priorities, and CSV handoff.</p></header>
-<main><section class="metrics">{metric("Total", metrics["total_leads"])}{metric("Hot", metrics["hot_leads"])}{metric("Warm", metrics["warm_leads"])}{metric("Today", metrics["follow_up_today"])}{metric("Avg score", metrics["average_score"])}</section>
+<main><section class="metrics">{metric("Total", metrics["total_leads"])}{metric("Hot", metrics["hot_leads"])}{metric("Warm", metrics["warm_leads"])}{metric("Today", metrics["follow_up_today"])}{metric("Overdue", metrics["overdue"])}{metric("Avg score", metrics["average_score"])}</section>
 <section class="layout"><div class="panel pipeline"><h2>Lead pipeline</h2><div class="scroll"><table><thead><tr><th>Lead</th><th>Service</th><th>Priority</th><th>Stage</th><th>Follow-up</th><th>Summary</th></tr></thead><tbody>{rows}</tbody></table></div><a class="button" href="/export/leads.csv">Export safe CSV</a></div>
 <div class="panel"><h2>Submit a lead</h2><p class="muted">The default mode is deterministic and makes no external request.</p><label for="source">Source</label><input id="source" value="website_form" maxlength="80"><label for="message">Message</label><textarea id="message" maxlength="10000">Hi, this is Olivia from Peak Home Services. We need CRM automation urgently. Budget is $1800. Email olivia@peakhome.example.</textarea><button id="submit">Analyze and add</button><p id="result" class="muted" aria-live="polite"></p></div></section></main>
-<script>document.getElementById('submit').addEventListener('click',async()=>{{const r=document.getElementById('result');r.textContent='Processing...';try{{const response=await fetch('/api/intake',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{source:document.getElementById('source').value,message:document.getElementById('message').value}})}});const data=await response.json();if(!response.ok)throw new Error(data.message||data.error||'Request failed');r.textContent=`Created ${{data.lead.priority_label}} lead. ${{data.lead.next_action}}`;setTimeout(()=>location.reload(),700)}}catch(error){{r.textContent=error.message}}}});</script></body></html>"""
+<script>const csrf={json.dumps(csrf_token)};document.getElementById('submit').addEventListener('click',async()=>{{const r=document.getElementById('result');r.textContent='Processing...';try{{const response=await fetch('/api/intake',{{method:'POST',headers:{{'Content-Type':'application/json','X-CSRF-Token':csrf}},body:JSON.stringify({{source:document.getElementById('source').value,message:document.getElementById('message').value}})}});const data=await response.json();if(!response.ok)throw new Error(data.message||data.error||'Request failed');r.textContent=`Created ${{data.lead.priority_label}} lead. ${{data.lead.next_action}}`;setTimeout(()=>location.reload(),700)}}catch(error){{r.textContent=error.message}}}});</script></body></html>"""
 
 
 def metric(label: str, value: object) -> str:
@@ -191,7 +304,7 @@ def render_lead_row(lead: dict[str, object]) -> str:
 
 def build_store(settings: Settings) -> JsonCRM:
     provider = OpenAIProvider(settings.openai_api_key, settings.openai_model, settings.openai_timeout_seconds) if settings.use_openai else None
-    return JsonCRM(settings.data_dir, provider=provider, store_raw_message=settings.store_raw_message)
+    return JsonCRM(settings.data_dir, provider=provider, store_raw_message=settings.store_raw_message, retention_days=settings.contact_retention_days)
 
 
 def build_server(settings: Settings) -> ThreadingHTTPServer:

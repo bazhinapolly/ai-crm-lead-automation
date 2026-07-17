@@ -36,12 +36,42 @@ def load_scoring_policy(path: Path = SCORING_POLICY_PATH) -> dict[str, object]:
     required = {"base_score", "urgency", "budget_signal", "intent", "service_bonus", "priority_thresholds"}
     if not isinstance(policy, dict) or set(policy) != required:
         raise ValueError("scoring policy has an invalid schema")
+    if not _is_policy_integer(policy["base_score"]):
+        raise ValueError("scoring policy base_score must be an integer")
+    for field, expected_keys in (
+        ("urgency", URGENCY_VALUES),
+        ("budget_signal", BUDGET_VALUES),
+        ("intent", INTENT_VALUES),
+    ):
+        values = policy.get(field)
+        if (
+            not isinstance(values, dict)
+            or set(values) != set(expected_keys)
+            or not all(_is_policy_integer(item) for item in values.values())
+        ):
+            raise ValueError(f"scoring policy {field} weights are invalid")
+    service_bonus = policy.get("service_bonus")
+    if not isinstance(service_bonus, dict) or set(service_bonus) != {"points", "services"}:
+        raise ValueError("scoring policy service_bonus is invalid")
+    services = service_bonus.get("services")
+    if (
+        not _is_policy_integer(service_bonus.get("points"))
+        or not isinstance(services, list)
+        or not services
+        or any(not isinstance(service, str) or service not in SERVICE_VALUES for service in services)
+        or len(set(services)) != len(services)
+    ):
+        raise ValueError("scoring policy service_bonus is invalid")
     thresholds = policy.get("priority_thresholds")
     if not isinstance(thresholds, dict) or set(thresholds) != {"hot", "warm"}:
         raise ValueError("scoring policy thresholds are invalid")
-    if not all(isinstance(value, int) for value in thresholds.values()) or not 0 <= thresholds["warm"] < thresholds["hot"] <= 100:
+    if not all(_is_policy_integer(value) for value in thresholds.values()) or not 0 <= thresholds["warm"] < thresholds["hot"] <= 100:
         raise ValueError("scoring policy thresholds must be ordered integers from 0 to 100")
     return policy
+
+
+def _is_policy_integer(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and -100 <= value <= 100
 
 
 SCORING_POLICY = load_scoring_policy()
@@ -87,7 +117,7 @@ def analyze_lead(
         "intent": detect_intent(lowered),
     }
     mode = "deterministic"
-    summary = build_summary(text, **{key: values[key] for key in ("service_needed", "urgency", "budget_signal")})
+    summary = build_summary(**{key: values[key] for key in ("service_needed", "urgency", "budget_signal")})
     reply = build_suggested_reply(values["service_needed"], values["urgency"])
 
     if provider is not None:
@@ -222,8 +252,7 @@ def next_action_for_priority(label: str, service: str) -> str:
     return "Add to the nurture list and send a lightweight overview."
 
 
-def build_summary(text: str, service_needed: str, urgency: str, budget_signal: str) -> str:
-    del text
+def build_summary(service_needed: str, urgency: str, budget_signal: str) -> str:
     return f"Lead asks about {service_needed}. Urgency: {urgency}. Budget: {budget_signal}."
 
 
@@ -237,10 +266,10 @@ def build_suggested_reply(service: str, urgency: str) -> str:
 
 def extract_name(message: str) -> str:
     for pattern in (
-        r"(?:my name is|i am|i'm|this is)\s+([A-Z][A-Za-z'-]{1,30}(?:\s+(?!from\b|at\b)[A-Z][A-Za-z'-]{1,30})?)",
-        r"contact\s*:\s*([A-Z][A-Za-z'-]{1,30})",
+        r"(?:My name is|I am|I'm|This is)\s+([A-Z][A-Za-z'-]{1,30}(?:\s+(?!from\b|at\b)[A-Z][A-Za-z'-]{1,30})?)",
+        r"(?:Contact|contact)\s*:\s*([A-Z][A-Za-z'-]{1,30})",
     ):
-        match = re.search(pattern, message, flags=re.IGNORECASE)
+        match = re.search(pattern, message)
         if match:
             return match.group(1).strip()
     return ""
@@ -250,7 +279,7 @@ def extract_company(message: str) -> str:
     for pattern in (
         r"(?:from|at)\s+([A-Z][A-Za-z0-9&'. -]{1,39}?)(?=[.,]|\s+(?:we|i|need|want|email)\b|$)",
     ):
-        match = re.search(pattern, message, flags=re.IGNORECASE)
+        match = re.search(pattern, message)
         if match:
             return match.group(1).strip()
     return ""

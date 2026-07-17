@@ -40,6 +40,8 @@ class Settings:
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini-2024-07-18"
     openai_timeout_seconds: int = 20
+    local_api_key: str = ""
+    contact_retention_days: int = 90
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -59,6 +61,9 @@ class Settings:
         if use_openai and not model:
             raise ValueError("OPENAI_MODEL is required when USE_OPENAI=1")
         data_value = os.environ.get("CRM_DATA_DIR", "").strip()
+        local_api_key = os.environ.get("LOCAL_API_KEY", "").strip()
+        if local_api_key and len(local_api_key) < 32:
+            raise ValueError("LOCAL_API_KEY must contain at least 32 characters")
         return cls(
             host=host,
             port=_int("PORT", 8080, 1, 65_535),
@@ -70,4 +75,6 @@ class Settings:
             openai_api_key=key,
             openai_model=model,
             openai_timeout_seconds=_int("OPENAI_TIMEOUT_SECONDS", 20, 1, 120),
+            local_api_key=local_api_key,
+            contact_retention_days=_int("CONTACT_RETENTION_DAYS", 90, 1, 3650),
         )

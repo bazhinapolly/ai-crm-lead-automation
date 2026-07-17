@@ -6,11 +6,14 @@ Lead messages can contain names, email addresses, phone numbers, business detail
 
 Optional OpenAI mode extracts contact fields locally, then redacts detected names, companies, email addresses, phone numbers, and long account-like numbers before sending the classification-relevant inquiry to the configured OpenAI project. Budget amounts are retained because they affect scoring. Generated summaries and replies are redacted locally again before storage. Pattern-based redaction is best-effort and cannot guarantee anonymization.
 
+Extracted contact fields use a configurable 90-day retention window by default. Retention is applied explicitly with `python3 src/purge_data.py`; individual records can be exported with `GET /api/leads/{id}` and removed with `DELETE /api/leads/{id}`. Deletion and purge events contain lead IDs and operational metadata, not contact values.
+
 Requests set `store: false`, which disables Responses application-state storage for the request. This does not by itself remove separate provider abuse-monitoring logs. Operators must review the current OpenAI data controls, selected project settings, contracts, and applicable law before processing real personal data.
 
 ## Local controls
 
 - Numeric loopback binding is enforced.
+- A strong optional local key protects bearer API access and browser sessions; session-authenticated writes require CSRF tokens.
 - Request bodies and normalized message length are bounded.
 - JSON media type and object shape are validated.
 - Application errors do not expose tracebacks, provider bodies, or secrets to clients.
@@ -22,10 +25,10 @@ Requests set `store: false`, which disables Responses application-state storage 
 
 Production rollout of the local application includes:
 
-1. Authenticated and authorized endpoints with tenant isolation.
+1. Mandatory authenticated and authorized endpoints with tenant isolation.
 2. TLS termination, CSRF/CORS policy, rate limiting, and abuse controls.
 3. A transactional managed database with migrations, backups, and recovery tests.
-4. Encryption, secrets management, retention/deletion automation, and audit policy.
+4. Encryption, secrets management, scheduled retention/deletion automation, and audit policy.
 5. Monitoring, alerting, tracing, queue/retry strategy, and provider budget limits.
 6. Data-processing agreements and an approved privacy/security review.
 7. Official CRM/source connectors with idempotency and reconciliation.

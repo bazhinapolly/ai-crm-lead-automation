@@ -102,7 +102,11 @@ class OpenAIProvider:
 
     @staticmethod
     def _extract_output(result: object) -> object:
-        if not isinstance(result, dict) or result.get("status") == "incomplete":
+        if (
+            not isinstance(result, dict)
+            or result.get("status") != "completed"
+            or result.get("error") is not None
+        ):
             raise OpenAIProviderError("AI analysis returned no complete result")
         outputs = result.get("output")
         if not isinstance(outputs, list):

@@ -60,6 +60,23 @@ class LeadAnalysisTests(unittest.TestCase):
         self.assertEqual(load_scoring_policy()["priority_thresholds"],{"hot":75,"warm":50})
         with self.assertRaisesRegex(ValueError,"readable JSON"): load_scoring_policy(Path("missing-policy.json"))
 
+    def test_scoring_policy_rejects_unknown_nested_keys_and_values(self):
+        import json
+        import tempfile
+        from copy import deepcopy
+        valid = load_scoring_policy()
+        cases = []
+        extra = deepcopy(valid); extra["urgency"]["urgent"] = 99; cases.append(extra)
+        boolean = deepcopy(valid); boolean["intent"]["high_intent"] = True; cases.append(boolean)
+        unknown_service = deepcopy(valid); unknown_service["service_bonus"]["services"] = ["unknown_service"]; cases.append(unknown_service)
+        malformed_bonus = deepcopy(valid); malformed_bonus["service_bonus"]["extra"] = 1; cases.append(malformed_bonus)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "policy.json"
+            for policy in cases:
+                path.write_text(json.dumps(policy), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "scoring policy"):
+                    load_scoring_policy(path)
+
     def test_generic_redactor_preserves_budget_but_removes_account_number(self):
         value=redact_sensitive_text("Budget $1800, account 1234 5678 9012, email a@example.com"); self.assertIn("$1800",value); self.assertNotIn("1234 5678 9012",value); self.assertNotIn("a@example.com",value)
 
@@ -97,6 +114,15 @@ class ContactExtractionTests(unittest.TestCase):
 
     def test_missing_contact_fields_are_empty(self) -> None:
         self.assertEqual(extract_contact("Need a dashboard"), {"name": "", "email": "", "phone": "", "company": ""})
+
+    def test_intent_and_urgency_phrases_are_not_false_contacts_or_redacted(self) -> None:
+        for message in ("This is urgent and we need CRM.", "I am looking for CRM automation."):
+            provider = StubProvider()
+            contact = extract_contact(message)
+            self.assertEqual(contact["name"], "")
+            self.assertEqual(contact["company"], "")
+            analyze_lead(message, NOW, provider)
+            self.assertIn("urgent" if "urgent" in message else "looking for", provider.last_message)
 
 
 if __name__ == "__main__":
